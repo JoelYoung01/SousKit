@@ -11,7 +11,8 @@ import { toast } from "@/stores/toast";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Camera, Link2, PenLine } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -47,7 +48,11 @@ export default function RecipeImportScreen() {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <ScreenHeader title="Import a recipe" />
-      <ScrollView contentContainerClassName="px-4 pb-10 pt-2" keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView
+        contentContainerClassName="px-4 pb-10 pt-2"
+        keyboardShouldPersistTaps="handled"
+        bottomOffset={24}
+      >
         <Text className="text-sm text-muted-foreground">
           Paste a link to a recipe website and we’ll pull ingredients and steps.
         </Text>
@@ -124,7 +129,7 @@ export default function RecipeImportScreen() {
           <PenLine size={16} color={colors.foreground} />
           Write from scratch instead
         </Button>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

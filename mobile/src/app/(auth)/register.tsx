@@ -8,7 +8,8 @@ import { stashDevOtp } from "@/lib/dev-otp";
 import { Image } from "expo-image";
 import { Link, useRouter } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
+import { View } from "react-native";
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -55,14 +56,12 @@ export default function RegisterScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollView
       className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      contentContainerClassName="flex-grow items-center justify-center gap-8 px-6 py-10"
+      keyboardShouldPersistTaps="handled"
+      bottomOffset={24}
     >
-      <ScrollView
-        contentContainerClassName="flex-grow items-center justify-center gap-8 px-6 py-10"
-        keyboardShouldPersistTaps="handled"
-      >
         <View className="items-center gap-3">
           <Image
             source={require("@/assets/images/chef-hat.png")}
@@ -130,7 +129,6 @@ export default function RegisterScreen() {
             </Link>
           </View>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }

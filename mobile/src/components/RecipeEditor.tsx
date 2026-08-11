@@ -26,7 +26,8 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { ImagePlus, Plus, Sparkles, Trash2 } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView, KeyboardStickyView } from "@/components/ui/keyboard";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface IngredientForm {
@@ -229,17 +230,16 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   };
 
   return (
-    <KeyboardAvoidingView
-      className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
+    <View className="flex-1 bg-background">
       <View style={{ paddingTop: insets.top }}>
         <ScreenHeader title={creating ? "New recipe" : "Edit recipe"} onBack={goBack} />
       </View>
 
-      <ScrollView
-        contentContainerClassName="gap-4 px-4 pb-40 pt-2"
+      <KeyboardAwareScrollView
+        className="flex-1"
+        contentContainerClassName="gap-4 px-4 pb-6 pt-2"
         keyboardShouldPersistTaps="handled"
+        bottomOffset={96}
       >
         {/* Cover image */}
         <View className="gap-2">
@@ -366,20 +366,21 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             </View>
           </View>
         ))}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
-      {/* Sticky save bar */}
-      <View
-        className="absolute inset-x-0 flex-row gap-2 px-4"
-        style={{ bottom: insets.bottom + 16 }}
-      >
-        <Button variant="outline" className="flex-1 bg-card" disabled={saving} onPress={goBack}>
-          Cancel
-        </Button>
-        <Button className="flex-1" disabled={!canSave} onPress={saveChanges}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </View>
-    </KeyboardAvoidingView>
+      <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+        <View
+          className="flex-row gap-2 border-t border-border bg-background px-4 pt-3"
+          style={{ paddingBottom: insets.bottom + 16 }}
+        >
+          <Button variant="outline" className="flex-1 bg-card" disabled={saving} onPress={goBack}>
+            Cancel
+          </Button>
+          <Button className="flex-1" disabled={!canSave} onPress={saveChanges}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </View>
+      </KeyboardStickyView>
+    </View>
   );
 }

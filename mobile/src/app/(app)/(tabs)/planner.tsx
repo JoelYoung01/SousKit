@@ -18,7 +18,8 @@ import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { CalendarDays, Search, Sparkles, Trash2 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const WEEK_COUNT = 8;
@@ -27,6 +28,13 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function PlannerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardHeight = useKeyboardState((s) => (s.isVisible ? s.height : 0));
+  // Keep sheet action rows above the keyboard by shrinking the recipe list.
+  const sheetListMaxHeight = Math.min(
+    320,
+    Math.max(120, (windowHeight - keyboardHeight) * 0.88 - 260)
+  );
   const params = useLocalSearchParams<{ date?: string }>();
 
   const today = useMemo(() => startOfDay(), []);
@@ -456,7 +464,11 @@ export default function PlannerScreen() {
             returnKeyType="search"
           />
         </View>
-        <ScrollView className="max-h-80" contentContainerClassName="gap-2 pb-2">
+        <ScrollView
+          style={{ maxHeight: sheetListMaxHeight }}
+          contentContainerClassName="gap-2 pb-2"
+          keyboardShouldPersistTaps="handled"
+        >
           {recipeList.isPending || (searchText.trim() && recipeSearch.isFetching && !searchResults.length) ? (
             [0, 1, 2, 3].map((n) => (
               <View
@@ -527,7 +539,11 @@ export default function PlannerScreen() {
       {/* Recipe select sheet */}
       <Sheet visible={sheetOpen} onClose={() => setSheetOpen(false)}>
         <Text className="px-1 pb-2 font-sans-semibold text-lg">Select recipes</Text>
-        <ScrollView className="max-h-96" contentContainerClassName="gap-2 pb-2">
+        <ScrollView
+          style={{ maxHeight: sheetListMaxHeight }}
+          contentContainerClassName="gap-2 pb-2"
+          keyboardShouldPersistTaps="handled"
+        >
           {recipeList.isPending ? (
             [0, 1, 2, 3].map((n) => (
               <View

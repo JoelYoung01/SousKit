@@ -17,7 +17,7 @@ module.exports = {
   },
   setupFiles: ["<rootDir>/test/setup.ts"],
   transformIgnorePatterns: [
-    "/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|standard-navigation|nativewind|react-native-css-interop|lucide-react-native))",
+    "/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|standard-navigation|nativewind|react-native-css-interop|lucide-react-native|react-native-keyboard-controller))",
   ],
   testMatch: ["**/__tests__/**/*.test.[jt]s?(x)"],
 };

@@ -2,6 +2,7 @@ import "../global.css";
 
 import { AppLockGate } from "@/components/AppLockGate";
 import { Toaster } from "@/components/Toaster";
+import { KeyboardProvider } from "@/components/ui/keyboard";
 import { colors } from "@/lib/colors";
 import { queryClient } from "@/lib/query-client";
 import { useAppLockStore } from "@/stores/app-lock";
@@ -59,15 +60,17 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background }
-          }}
-        />
-        <AppLockGate />
-        <Toaster />
+        <KeyboardProvider>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.background }
+            }}
+          />
+          <AppLockGate />
+          <Toaster />
+        </KeyboardProvider>
       </SafeAreaProvider>
     </QueryClientProvider>
   );

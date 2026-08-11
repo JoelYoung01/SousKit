@@ -9,7 +9,8 @@ import { useSessionStore } from "@/stores/session";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
+import { View } from "react-native";
 
 export default function VerifyEmailScreen() {
   const params = useLocalSearchParams<{ email?: string }>();
@@ -73,14 +74,12 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollView
       className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      contentContainerClassName="flex-grow items-center justify-center gap-8 px-6 py-10"
+      keyboardShouldPersistTaps="handled"
+      bottomOffset={24}
     >
-      <ScrollView
-        contentContainerClassName="flex-grow items-center justify-center gap-8 px-6 py-10"
-        keyboardShouldPersistTaps="handled"
-      >
         <View className="items-center gap-3">
           <Image
             source={require("@/assets/images/chef-hat.png")}
@@ -141,7 +140,6 @@ export default function VerifyEmailScreen() {
             {resending ? "Sending…" : "Resend code"}
           </Button>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }
