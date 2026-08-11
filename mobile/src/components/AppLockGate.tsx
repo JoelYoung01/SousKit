@@ -5,8 +5,9 @@ import { useEffect } from "react";
 import { AppState, Platform } from "react-native";
 
 /**
- * Renders the biometric LockScreen over the whole app while it is locked,
- * and re-locks whenever the app is backgrounded (native only).
+ * Renders the biometric LockScreen over the whole app while it is locked.
+ * Starts a grace timer when backgrounded; re-locks only after an hour away
+ * (native only). Returning within the hour resets the timer.
  */
 export function AppLockGate() {
   const sessionStatus = useSessionStore((s) => s.status);
@@ -16,7 +17,9 @@ export function AppLockGate() {
   useEffect(() => {
     if (Platform.OS === "web") return;
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "background") useAppLockStore.getState().lock();
+      const store = useAppLockStore.getState();
+      if (state === "background") store.markBackgrounded();
+      else if (state === "active") store.resume();
     });
     return () => sub.remove();
   }, []);
