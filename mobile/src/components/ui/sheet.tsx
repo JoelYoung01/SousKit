@@ -119,6 +119,11 @@ export function Sheet({
     requestCloseRef.current = requestClose;
   }, [requestClose]);
 
+  // Stable JS callback for runOnJS — worklets must not read .current themselves.
+  const closeFromGesture = useCallback(() => {
+    requestCloseRef.current();
+  }, []);
+
   useEffect(() => {
     if (visible) {
       closing.current = false;
@@ -151,7 +156,7 @@ export function Sheet({
         const shouldClose =
           motion.translateY.value > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY;
         if (shouldClose) {
-          runOnJS(requestCloseRef.current)();
+          runOnJS(closeFromGesture)();
         } else {
           motion.translateY.value = withSpring(0, SNAP_SPRING);
         }
