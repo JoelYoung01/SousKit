@@ -76,10 +76,9 @@ const currentPlannedRecipes = computed(
   () => plannedByDay.value.get(toDateKey(selectedDate.value)) ?? []
 );
 
-const currentWeekGapDays = computed(() => {
-  const days = weeks.value[0]?.days ?? [];
+function gapDaysForWeek(days: Date[]): Date[] {
   return days.filter((d) => (plannedByDay.value.get(toDateKey(d)) ?? []).length === 0);
-});
+}
 
 const formattedSelectedDate = computed(() => {
   const date = selectedDate.value;
@@ -129,12 +128,16 @@ function openNightSearch() {
   }, 0);
 }
 
-function openFillGaps(days?: Date[]) {
-  const keys = (days ?? currentWeekGapDays.value).map(toDateKey);
+function openFillGaps(days: Date[]) {
+  const keys = days.map(toDateKey);
   router.push({
     path: paths.plannerFill,
     query: keys.length ? { days: keys.join(",") } : {}
   });
+}
+
+function openWeekFillGaps(weekDays: Date[]) {
+  openFillGaps(gapDaysForWeek(weekDays));
 }
 
 /** Week containing the selected day — target for the thumb-reach Plan week FAB. */
@@ -256,32 +259,30 @@ onActivated(() => {
 
 <template>
   <div class="px-4 pt-5 pb-28">
-    <div class="flex items-start justify-between gap-3">
-      <div>
-        <h1 class="text-xl font-bold">Planner</h1>
-        <p class="mt-1 text-sm text-muted-foreground">This week up top — scroll for more</p>
-      </div>
-      <Button
-        size="sm"
-        class="shrink-0 gap-1.5"
-        :disabled="!currentWeekGapDays.length && plannerStore.loading"
-        @click="openFillGaps()"
-      >
-        <Sparkles class="size-3.5" />
-        Fill gaps
-      </Button>
-    </div>
+    <h1 class="text-xl font-bold">Planner</h1>
 
     <div class="mt-4 space-y-5">
       <section v-for="week in weeks" :key="week.weekIndex" class="space-y-2">
         <div
-          class="sticky top-0 z-10 -mx-4 border-b border-border/80 bg-background/95 px-4 py-2 backdrop-blur-sm"
+          class="sticky top-0 z-10 -mx-4 flex items-center justify-between gap-3 border-b border-border/80 bg-background/95 px-4 py-2 backdrop-blur-sm"
         >
-          <h2 class="text-sm font-semibold">{{ weekLabel(week.weekStart, week.weekIndex) }}</h2>
-          <p class="text-[11px] text-faint">
-            {{ week.days.filter((d) => (plannedByDay.get(toDateKey(d)) ?? []).length).length }}
-            / 7 planned
-          </p>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-sm font-semibold">{{ weekLabel(week.weekStart, week.weekIndex) }}</h2>
+            <p class="text-[11px] text-faint">
+              {{ week.days.filter((d) => (plannedByDay.get(toDateKey(d)) ?? []).length).length }}
+              / 7 planned
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            class="shrink-0 gap-1.5"
+            :disabled="!gapDaysForWeek(week.days).length"
+            @click="openWeekFillGaps(week.days)"
+          >
+            <Sparkles class="size-3.5" />
+            Fill gaps
+          </Button>
         </div>
 
         <div class="overflow-hidden rounded-xl border border-border bg-card">
