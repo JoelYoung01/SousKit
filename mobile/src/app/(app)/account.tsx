@@ -13,7 +13,8 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Pencil, UserRound } from "lucide-react-native";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -62,18 +63,15 @@ export default function AccountScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollView
       className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      contentContainerStyle={{
+        paddingTop: insets.top + 8,
+        paddingBottom: insets.bottom + 24
+      }}
+      keyboardShouldPersistTaps="handled"
+      bottomOffset={24}
     >
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{
-          paddingTop: insets.top + 8,
-          paddingBottom: insets.bottom + 24
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
         <ScreenHeader title="My account" />
 
         <View className="px-4 pt-4">
@@ -143,7 +141,6 @@ export default function AccountScreen() {
             Sign out
           </Button>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }

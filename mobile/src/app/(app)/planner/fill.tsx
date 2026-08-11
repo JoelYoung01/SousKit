@@ -43,7 +43,8 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, RefreshCw, Sparkles } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -544,18 +545,16 @@ export default function MealPlanWizardScreen() {
       .join(" ");
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollView
       className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      contentContainerStyle={{
+        paddingTop: insets.top + 12,
+        paddingHorizontal: 16,
+        paddingBottom: insets.bottom + 32
+      }}
+      keyboardShouldPersistTaps="handled"
+      bottomOffset={24}
     >
-      <ScrollView
-        contentContainerStyle={{
-          paddingTop: insets.top + 12,
-          paddingHorizontal: 16,
-          paddingBottom: insets.bottom + 32
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
         {/* Header */}
         <View className="flex-row items-center gap-2">
           <Pressable
@@ -1205,7 +1204,6 @@ export default function MealPlanWizardScreen() {
             </View>
           </View>
         ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }

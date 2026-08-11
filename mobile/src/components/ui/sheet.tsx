@@ -1,3 +1,4 @@
+import { KeyboardStickyView } from "@/components/ui/keyboard";
 import { cn } from "@/lib/cn";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -9,10 +10,12 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /**
  * Bottom sheet: scrim fade + panel slide, drag-down on the handle to close.
+ * Lifts with the keyboard via KeyboardStickyView so inputs stay visible.
  * Mirrors the web app's AddMenuSheet mechanics.
  */
 export function Sheet({
@@ -28,6 +31,7 @@ export function Sheet({
 }) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardState((s) => (s.isVisible ? s.height : 0));
   const [mounted, setMounted] = useState(visible);
   const [translateY] = useState(() => new Animated.Value(height));
   const [scrim] = useState(() => new Animated.Value(0));
@@ -107,6 +111,9 @@ export function Sheet({
 
   if (!mounted) return null;
 
+  // Shrink tall sheets (e.g. recipe search) so they stay above the keyboard.
+  const panelMaxHeight = (height - keyboardHeight) * 0.88;
+
   return (
     <Modal
       transparent
@@ -121,16 +128,21 @@ export function Sheet({
         >
           <Pressable style={{ flex: 1 }} onPress={requestClose} accessibilityLabel="Close" />
         </Animated.View>
-        <Animated.View style={{ transform: [{ translateY }], maxHeight: height * 0.88 }}>
-          <View
-            className={cn("rounded-t-[20px] border border-b-0 border-border bg-card px-4", className)}
-            style={{ paddingBottom: insets.bottom + 12 }}
-          >
-            <View {...panResponder.panHandlers} className="items-center py-3">
-              <View className="h-1.5 w-10 rounded-full bg-border" />
+        <Animated.View style={{ transform: [{ translateY }] }}>
+          <KeyboardStickyView style={{ maxHeight: panelMaxHeight }}>
+            <View
+              className={cn(
+                "rounded-t-[20px] border border-b-0 border-border bg-card px-4",
+                className
+              )}
+              style={{ paddingBottom: insets.bottom + 12 }}
+            >
+              <View {...panResponder.panHandlers} className="items-center py-3">
+                <View className="h-1.5 w-10 rounded-full bg-border" />
+              </View>
+              {children}
             </View>
-            {children}
-          </View>
+          </KeyboardStickyView>
         </Animated.View>
       </View>
     </Modal>

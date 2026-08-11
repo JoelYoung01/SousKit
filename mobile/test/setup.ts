@@ -10,3 +10,9 @@ jest.mock("react-native-safe-area-context", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
   return require("react-native-safe-area-context/jest/mock").default;
 });
+
+// Official mock: KeyboardProvider / hooks / aware views become RN stubs.
+jest.mock("react-native-keyboard-controller", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
+  return require("react-native-keyboard-controller/jest");
+});

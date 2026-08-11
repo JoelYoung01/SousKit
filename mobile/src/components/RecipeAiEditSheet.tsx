@@ -9,7 +9,7 @@ import { syncAfterRecipeMutation } from "@/hooks/sync";
 import { toast } from "@/stores/toast";
 import { Sparkles } from "lucide-react-native";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, View } from "react-native";
+import { View } from "react-native";
 
 type Props = {
   visible: boolean;
@@ -47,40 +47,38 @@ export function RecipeAiEditSheet({ visible, recipeId, onClose, onApplied }: Pro
 
   return (
     <Sheet visible={visible} onClose={handleClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View className="gap-3 pb-2">
-          <View className="flex-row items-center gap-2">
-            <View className="h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
-              <Sparkles size={18} color={colors.green500} />
-            </View>
-            <View className="min-w-0 flex-1">
-              <Text className="font-sans-semibold text-base">Edit with AI</Text>
-              <Text className="text-xs text-muted-foreground">
-                Describe what to change — ingredients, servings, style, etc.
-              </Text>
-            </View>
+      <View className="gap-3 pb-2">
+        <View className="flex-row items-center gap-2">
+          <View className="h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
+            <Sparkles size={18} color={colors.green500} />
           </View>
-
-          <Textarea
-            value={instruction}
-            onChangeText={setInstruction}
-            editable={!saving}
-            placeholder="e.g. Make it dairy-free and cut prep time in half"
-            className="min-h-[120px] rounded-xl"
-            autoFocus
-          />
-
-          <View className="flex-row gap-2 pt-1">
-            <Button variant="outline" className="flex-1" disabled={saving} onPress={handleClose}>
-              Cancel
-            </Button>
-            <Button className="flex-1" disabled={!canSave} onPress={onSave}>
-              {saving ? <Spinner size="small" color={colors.foreground} /> : null}
-              {saving ? "Updating…" : "Apply edit"}
-            </Button>
+          <View className="min-w-0 flex-1">
+            <Text className="font-sans-semibold text-base">Edit with AI</Text>
+            <Text className="text-xs text-muted-foreground">
+              Describe what to change — ingredients, servings, style, etc.
+            </Text>
           </View>
         </View>
-      </KeyboardAvoidingView>
+
+        <Textarea
+          value={instruction}
+          onChangeText={setInstruction}
+          editable={!saving}
+          placeholder="e.g. Make it dairy-free and cut prep time in half"
+          className="min-h-[120px] rounded-xl"
+          autoFocus
+        />
+
+        <View className="flex-row gap-2 pt-1">
+          <Button variant="outline" className="flex-1" disabled={saving} onPress={handleClose}>
+            Cancel
+          </Button>
+          <Button className="flex-1" disabled={!canSave} onPress={onSave}>
+            {saving ? <Spinner size="small" color={colors.foreground} /> : null}
+            {saving ? "Updating…" : "Apply edit"}
+          </Button>
+        </View>
+      </View>
     </Sheet>
   );
 }
