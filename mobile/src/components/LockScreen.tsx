@@ -73,13 +73,13 @@ export function LockScreen() {
           <Text className="text-sm text-muted-foreground">Locked</Text>
         </View>
 
-        <View className="w-full max-w-[280px] items-center gap-3">
+        <View className="items-center gap-3">
           {failed ? (
             <Text className="text-center text-sm text-muted-foreground">
               Couldn’t verify it’s you. Try again.
             </Text>
           ) : null}
-          <Button className="h-11 w-full" disabled={prompting} onPress={() => void tryUnlock()}>
+          <Button className="h-11 px-6" disabled={prompting} onPress={() => void tryUnlock()}>
             <ScanFace size={18} color={colors.foreground} />
             {prompting ? "Unlocking…" : `Unlock with ${label}`}
           </Button>
