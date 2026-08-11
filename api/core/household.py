@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 from sqlmodel import Session, col, func, or_, select
 
+from api.core.config import settings
 from api.models import (
     GroceryItemState,
     Household,
@@ -22,6 +23,13 @@ from api.models import (
 
 MAX_HOUSEHOLD_MEMBERS = 8
 INVITE_EXPIRY_DAYS = 14
+
+
+def invite_join_url(token: str) -> str:
+    """HTTPS join URL for QR / copy-link sharing (Universal Link friendly)."""
+    base = settings.FRONTEND_HOST.rstrip("/")
+    path = settings.HOUSEHOLD_JOIN_PATH.strip("/")
+    return f"{base}/{path}/{token}"
 
 
 def default_household_name(display_name: str) -> str:
@@ -81,15 +89,15 @@ def get_user_household(session: Session, user_id: int) -> Household | None:
     return session.get(Household, membership.household_id)
 
 
-def require_membership(session: Session, user: User) -> tuple[Household, HouseholdMember]:
+def require_membership(
+    session: Session, user: User
+) -> tuple[Household, HouseholdMember]:
     membership = get_membership(session, user.id)
     if not membership:
         household = ensure_user_household(session, user)
         membership = get_membership(session, user.id)
         if not membership:
-            raise HTTPException(
-                status_code=500, detail="Couldn’t load your household."
-            )
+            raise HTTPException(status_code=500, detail="Couldn’t load your household.")
         return household, membership
     household = session.get(Household, membership.household_id)
     if not household:
@@ -130,9 +138,7 @@ def recipe_access_filter(household_id: int):
     return or_(Recipe.public, Recipe.household_id == household_id)
 
 
-def user_can_access_recipe(
-    session: Session, user: User, recipe: Recipe
-) -> bool:
+def user_can_access_recipe(session: Session, user: User, recipe: Recipe) -> bool:
     if recipe.public:
         return True
     membership = get_membership(session, user.id)
@@ -224,48 +230,17 @@ def create_invite(
     *,
     household: Household,
     invited_by: User,
-    email: str,
 ) -> HouseholdInvite:
-    normalized = email.strip().lower()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Email is required.")
-
+    """Create a single-use shareable link/QR invite (no email binding)."""
     if member_count(session, household.id) >= MAX_HOUSEHOLD_MEMBERS:
         raise HTTPException(
             status_code=400,
             detail=f"Households can have at most {MAX_HOUSEHOLD_MEMBERS} people.",
         )
 
-    existing_user = session.exec(
-        select(User).where(User.email == normalized)
-    ).first()
-    if existing_user:
-        existing_membership = get_membership(session, existing_user.id)
-        if (
-            existing_membership
-            and existing_membership.household_id == household.id
-        ):
-            raise HTTPException(
-                status_code=400, detail="That person is already in this household."
-            )
-
-    pending = session.exec(
-        select(HouseholdInvite).where(
-            HouseholdInvite.household_id == household.id,
-            HouseholdInvite.email == normalized,
-            HouseholdInvite.status == HouseholdInviteStatus.pending.value,
-        )
-    ).first()
-    if pending and pending.expires_on > datetime.now(UTC):
-        return pending
-
-    if pending:
-        pending.status = HouseholdInviteStatus.revoked.value
-        session.add(pending)
-
     invite = HouseholdInvite(
         household_id=household.id,
-        email=normalized,
+        email=None,
         invited_by_id=invited_by.id,
         token=secrets.token_urlsafe(32),
         status=HouseholdInviteStatus.pending.value,
@@ -292,7 +267,8 @@ def accept_invite(session: Session, *, user: User, token: str) -> Household:
         session.commit()
         raise HTTPException(status_code=400, detail="That invite has expired.")
 
-    if user.email.strip().lower() != invite.email:
+    # Legacy email-bound invites still require the invited address.
+    if invite.email and user.email.strip().lower() != invite.email.strip().lower():
         raise HTTPException(
             status_code=403,
             detail="Sign in with the email this invite was sent to.",
@@ -357,9 +333,7 @@ def leave_household(session: Session, user: User) -> Household:
 
     old_household_id = membership.household_id
     remaining = [
-        m
-        for m in list_members(session, old_household_id)
-        if m.user_id != user.id
+        m for m in list_members(session, old_household_id) if m.user_id != user.id
     ]
     if not remaining:
         # Already solo — nothing to leave; keep data where it is.
@@ -396,7 +370,9 @@ def remove_member(session: Session, *, owner: User, target_user_id: int) -> None
         )
     ).first()
     if not membership:
-        raise HTTPException(status_code=404, detail="That member isn’t in this household.")
+        raise HTTPException(
+            status_code=404, detail="That member isn’t in this household."
+        )
 
     session.delete(membership)
     session.commit()

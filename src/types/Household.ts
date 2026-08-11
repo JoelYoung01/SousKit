@@ -9,12 +9,13 @@ export interface HouseholdMember {
 
 export interface HouseholdInvite {
   id: number;
-  email: string;
+  email?: string | null;
   status: string;
   created_on: string;
   expires_on: string;
   invited_by_id: number;
   token?: string | null;
+  invite_url?: string | null;
 }
 
 export interface Household {
@@ -35,6 +36,7 @@ export interface PendingHouseholdInvite {
   household_name: string;
   invited_by_name: string;
   token: string;
+  invite_url?: string | null;
   created_on: string;
   expires_on: string;
 }

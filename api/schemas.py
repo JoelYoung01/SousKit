@@ -314,13 +314,14 @@ class HouseholdMemberResponse(BaseModel):
 
 class HouseholdInviteResponse(BaseModel):
     id: int
-    email: str
+    email: str | None = None
     status: str
     created_on: datetime
     expires_on: datetime
     invited_by_id: int
-    # Returned to the owner so they can share the link/code out-of-band.
+    # Returned to the owner so they can share the join link / QR out-of-band.
     token: str | None = None
+    invite_url: str | None = None
 
 
 class HouseholdResponse(BaseModel):
@@ -339,22 +340,19 @@ class HouseholdUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
-class HouseholdInviteCreate(BaseModel):
-    email: EmailStr
-
-
 class HouseholdInviteAccept(BaseModel):
     token: str = Field(min_length=8, max_length=128)
 
 
 class PendingHouseholdInviteResponse(BaseModel):
-    """Invite addressed to the current user's email (for accept UI)."""
+    """Legacy invite addressed to the current user's email (for accept UI)."""
 
     id: int
     household_id: int
     household_name: str
     invited_by_name: str
     token: str
+    invite_url: str | None = None
     created_on: datetime
     expires_on: datetime
 

@@ -18,7 +18,9 @@ export const paths = {
   /** Ad-hoc LLM recipe create; optional day assign after save. */
   recipeGenerate: "/planner/fill?mode=recipe",
   list: "/list",
-  account: "/account"
+  account: "/account",
+  /** Household invite deep link / Universal Link landing */
+  joinHousehold: (token: string) => `/join/${encodeURIComponent(token)}`
 } as const;
 
 export type AddMenuActionId =

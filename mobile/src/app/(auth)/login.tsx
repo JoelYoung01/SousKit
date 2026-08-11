@@ -11,13 +11,16 @@ import { colors } from "@/lib/colors";
 import { stashDevOtp } from "@/lib/dev-otp";
 import { useSessionStore } from "@/stores/session";
 import { Image } from "expo-image";
-import { Link, useRouter } from "expo-router";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
 import { LoaderCircle } from "lucide-react-native";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ redirect?: string | string[] }>();
+  const redirectRaw = params.redirect;
+  const redirect = Array.isArray(redirectRaw) ? redirectRaw[0] : redirectRaw;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -113,7 +116,14 @@ export default function LoginScreen() {
               </Button>
               <View className="flex-row justify-center gap-1">
                 <Text className="text-sm text-muted-foreground">New here?</Text>
-                <Link href="/register" asChild>
+                <Link
+                  href={
+                    redirect
+                      ? { pathname: "/register", params: { redirect } }
+                      : "/register"
+                  }
+                  asChild
+                >
                   <Text className="text-sm text-[#22c55e]">Create an account</Text>
                 </Link>
               </View>

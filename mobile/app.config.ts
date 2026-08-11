@@ -10,9 +10,14 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
  * - SOUSKIT_IOS_BUNDLE_ID    — Apple bundle identifier (must match the
  *   provisioning profile used to sign release builds).
  * - SOUSKIT_IOS_BUILD_NUMBER — CFBundleVersion; unique per TestFlight upload.
+ * - SOUSKIT_ASSOCIATED_DOMAIN — host for Universal Links (no scheme), e.g.
+ *   recipe-db.joelyoung.dev. Enables https join URLs to open the app.
  * - EXPO_PUBLIC_API_URL    — API base URL baked into the JS bundle
  *   (see src/config.ts for defaults).
  */
+const associatedDomain =
+  process.env.SOUSKIT_ASSOCIATED_DOMAIN || "recipe-db.joelyoung.dev";
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "Sous Kit",
@@ -31,6 +36,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Sign in with Apple entitlement (the App ID must have the capability
     // enabled in the Apple Developer portal).
     usesAppleSignIn: true,
+    // Universal Links: https://<domain>/join/<token> opens the app when
+    // installed; otherwise the web join page handles the invite.
+    associatedDomains: [`applinks:${associatedDomain}`],
     config: {
       usesNonExemptEncryption: false,
     },

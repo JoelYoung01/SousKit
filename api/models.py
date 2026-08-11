@@ -192,7 +192,8 @@ class HouseholdMember(BaseIndexedDbModel, table=True):
 
 class HouseholdInvite(BaseIndexedDbModel, table=True):
     household_id: int = Field(foreign_key="household.id", index=True)
-    email: str = Field(index=True)
+    # Null for shareable link/QR invites; set only for legacy email-bound invites.
+    email: str | None = Field(default=None, index=True)
     invited_by_id: int = Field(foreign_key="user.id")
     token: str = Field(index=True, unique=True)
     status: str = HouseholdInviteStatus.pending.value

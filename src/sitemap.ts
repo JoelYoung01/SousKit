@@ -17,6 +17,7 @@ export type SiteRouteName =
   | "planner-fill"
   | "list"
   | "account"
+  | "join-household"
   | "public-user"
   | "not-found";
 
@@ -46,6 +47,8 @@ export const paths = {
   recipeGenerate: "/planner/fill?mode=recipe",
   list: "/list",
   account: "/account",
+  /** Household invite deep link / Universal Link landing */
+  joinHousehold: (token: string) => `/join/${encodeURIComponent(token)}`,
   publicUser: (id: number | string) => `/users/${id}`,
   notFound: "/not-found"
 } as const;

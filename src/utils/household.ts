@@ -17,8 +17,9 @@ export function removeHouseholdMember(userId: number): Promise<void> {
   return del(`/household/members/${userId}/`);
 }
 
-export function inviteToHousehold(email: string): Promise<HouseholdInvite> {
-  return post<HouseholdInvite>("/household/invites/", { email });
+/** Create a single-use join link / QR invite. */
+export function inviteToHousehold(): Promise<HouseholdInvite> {
+  return post<HouseholdInvite>("/household/invites/", {});
 }
 
 export function revokeHouseholdInvite(inviteId: number): Promise<void> {

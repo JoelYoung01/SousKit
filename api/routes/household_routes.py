@@ -12,6 +12,7 @@ from api.core.household import (
     MAX_HOUSEHOLD_MEMBERS,
     accept_invite,
     create_invite,
+    invite_join_url,
     leave_household,
     list_members,
     remove_member,
@@ -21,7 +22,6 @@ from api.core.household import (
 from api.models import HouseholdInvite, HouseholdInviteStatus, User
 from api.schemas import (
     HouseholdInviteAccept,
-    HouseholdInviteCreate,
     HouseholdInviteResponse,
     HouseholdMemberResponse,
     HouseholdResponse,
@@ -50,6 +50,7 @@ def _member_response(member, user: User) -> HouseholdMemberResponse:
 def _invite_response(
     invite: HouseholdInvite, *, include_token: bool
 ) -> HouseholdInviteResponse:
+    token = invite.token if include_token else None
     return HouseholdInviteResponse(
         id=invite.id,
         email=invite.email,
@@ -57,7 +58,8 @@ def _invite_response(
         created_on=invite.created_on,
         expires_on=invite.expires_on,
         invited_by_id=invite.invited_by_id,
-        token=invite.token if include_token else None,
+        token=token,
+        invite_url=invite_join_url(invite.token) if token else None,
     )
 
 
@@ -69,13 +71,10 @@ def _household_response(
     members = list_members(session, household.id)
     user_ids = [m.user_id for m in members]
     users = {
-        u.id: u
-        for u in session.exec(select(User).where(User.id.in_(user_ids))).all()
+        u.id: u for u in session.exec(select(User).where(User.id.in_(user_ids))).all()
     }
     member_payloads = [
-        _member_response(m, users[m.user_id])
-        for m in members
-        if m.user_id in users
+        _member_response(m, users[m.user_id]) for m in members if m.user_id in users
     ]
 
     pending = session.exec(
@@ -142,16 +141,15 @@ def remove_household_member(
 
 @router.post("/invites/", response_model=HouseholdInviteResponse, status_code=201)
 def invite_to_household(
-    body: HouseholdInviteCreate,
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    """Create a single-use join link (QR / copy URL) for the household."""
     household, _ = require_owner(session, current_user)
     invite = create_invite(
         session,
         household=household,
         invited_by=current_user,
-        email=str(body.email),
     )
     return _invite_response(invite, include_token=True)
 
@@ -191,6 +189,7 @@ def list_pending_invites_for_me(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    """Legacy email-addressed invites still waiting for this user."""
     email = current_user.email.strip().lower()
     invites = session.exec(
         select(HouseholdInvite)
@@ -218,6 +217,7 @@ def list_pending_invites_for_me(
                 household_name=household.name,
                 invited_by_name=inviter.display_name if inviter else "Someone",
                 token=inv.token,
+                invite_url=invite_join_url(inv.token),
                 created_on=inv.created_on,
                 expires_on=inv.expires_on,
             )

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.core.config import settings
@@ -54,6 +55,49 @@ register_exception_handlers(app)
 
 # Add Uploads dir
 app.mount("/uploads/", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
+
+def _apple_app_site_association() -> JSONResponse:
+    """Universal Links manifest so https://…/join/… opens the iOS app when installed."""
+    app_id = (
+        f"{settings.APPLE_TEAM_ID}.{settings.APPLE_APP_BUNDLE_ID}"
+        if settings.APPLE_TEAM_ID
+        else None
+    )
+    details = (
+        [
+            {
+                "appIDs": [app_id],
+                "components": [
+                    {"/": "/join/*"},
+                    {"/": "/join"},
+                ],
+            }
+        ]
+        if app_id
+        else []
+    )
+    payload = {
+        "applinks": {
+            "apps": [],
+            "details": details,
+        }
+    }
+    return JSONResponse(
+        content=payload,
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association_well_known():
+    return _apple_app_site_association()
+
+
+@app.get("/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association_root():
+    return _apple_app_site_association()
 
 
 # Add the static frontend files if not in development
