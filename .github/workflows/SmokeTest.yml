@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Poll health endpoint for expected version
         env:
-          APP_URL: https://recipe-db.joelyoung.dev
+          APP_URL: https://sous-kit.com
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           INTERVAL_SECONDS: ${{ inputs.interval_seconds }}

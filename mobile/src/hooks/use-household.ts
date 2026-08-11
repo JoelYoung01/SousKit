@@ -52,7 +52,7 @@ export function useHouseholdMutations() {
       onSuccess: invalidate
     }),
     invite: useMutation({
-      mutationFn: inviteToHousehold,
+      mutationFn: () => inviteToHousehold(),
       onSuccess: invalidate
     }),
     revokeInvite: useMutation({

@@ -24,12 +24,12 @@ function loadConfig(envValue: string | undefined, dev: boolean) {
 
 describe("API_URL resolution", () => {
   it("ignores an empty env value (unset CI var)", () => {
-    expect(loadConfig("", false).API_URL).toBe("https://recipe-db.joelyoung.dev/api");
+    expect(loadConfig("", false).API_URL).toBe("https://sous-kit.com/api");
     expect(loadConfig("", true).API_URL).toBe("http://localhost:8000/api");
   });
 
   it("ignores a relative env value (web app's /api)", () => {
-    expect(loadConfig("/api", false).API_URL).toBe("https://recipe-db.joelyoung.dev/api");
+    expect(loadConfig("/api", false).API_URL).toBe("https://sous-kit.com/api");
   });
 
   it("uses an absolute env value as-is", () => {

@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { extractInviteToken, inviteLabel } from "@/lib/household-invite";
 import { useSessionStore } from "@/stores/session";
-import type { Household, PendingHouseholdInvite } from "@/types";
+import type { Household, HouseholdInvite, PendingHouseholdInvite } from "@/types";
 import {
   acceptHouseholdInvite,
   fetchHousehold,
@@ -15,18 +24,22 @@ import {
 } from "@/utils/household";
 import { toast } from "@/utils/toast";
 import { Users } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import QRCode from "qrcode";
+import { computed, onMounted, ref, watch } from "vue";
 
 const sessionStore = useSessionStore();
 const household = ref<Household | null>(null);
 const pendingInvites = ref<PendingHouseholdInvite[]>([]);
 const loading = ref(true);
-const inviteEmail = ref("");
 const nameDraft = ref("");
 const editingName = ref(false);
 const busy = ref(false);
-const lastInviteToken = ref<string | null>(null);
-const inviteCode = ref("");
+const pasteValue = ref("");
+
+const inviteDialogOpen = ref(false);
+const inviteUrl = ref<string | null>(null);
+const inviteQrDataUrl = ref<string | null>(null);
+const creatingInvite = ref(false);
 
 const isOwner = computed(() => household.value?.my_role === "owner");
 const shared = computed(() => (household.value?.member_count ?? 0) > 1);
@@ -44,20 +57,58 @@ async function load() {
   }
 }
 
+async function renderQr(url: string) {
+  inviteQrDataUrl.value = await QRCode.toDataURL(url, {
+    margin: 1,
+    width: 240,
+    color: { dark: "#090b09", light: "#ffffff" }
+  });
+}
+
+watch(inviteUrl, (url) => {
+  inviteQrDataUrl.value = null;
+  if (url)
+    void renderQr(url).catch(() => {
+      toast.fromError(new Error("Couldn’t render the QR code."));
+    });
+});
+
 async function onInvite() {
-  const email = inviteEmail.value.trim().toLowerCase();
-  if (!email || busy.value) return;
-  busy.value = true;
+  if (busy.value || creatingInvite.value) return;
+  creatingInvite.value = true;
+  inviteDialogOpen.value = true;
+  inviteUrl.value = null;
   try {
-    const invite = await inviteToHousehold(email);
-    inviteEmail.value = "";
-    lastInviteToken.value = invite.token ?? null;
+    const invite = await inviteToHousehold();
+    const url = invite.invite_url;
+    if (!url) throw new Error("Invite link missing from server response.");
+    inviteUrl.value = url;
     await load();
-    toast.success(`Invite ready for ${email}.`);
   } catch (error) {
+    inviteDialogOpen.value = false;
     toast.fromError(error, "Couldn’t create that invite.");
   } finally {
-    busy.value = false;
+    creatingInvite.value = false;
+  }
+}
+
+function showInvite(invite: HouseholdInvite) {
+  const url = invite.invite_url;
+  if (!url) {
+    toast.fromError(new Error("That invite has no link to share."));
+    return;
+  }
+  inviteUrl.value = url;
+  inviteDialogOpen.value = true;
+}
+
+async function copyInviteLink() {
+  if (!inviteUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(inviteUrl.value);
+    toast.success("Invite link copied.");
+  } catch {
+    toast.fromError(new Error("Couldn’t copy invite link."));
   }
 }
 
@@ -130,15 +181,6 @@ async function onRevoke(inviteId: number) {
     toast.fromError(error, "Couldn’t revoke invite.");
   } finally {
     busy.value = false;
-  }
-}
-
-async function copyToken(token: string) {
-  try {
-    await navigator.clipboard.writeText(token);
-    toast.success("Invite code copied.");
-  } catch {
-    toast.fromError(new Error("Couldn’t copy invite code."));
   }
 }
 
@@ -219,24 +261,12 @@ onMounted(load);
         </div>
 
         <div v-if="isOwner" class="mt-5 space-y-2 border-t border-border pt-4">
-          <p class="text-xs text-muted-foreground">Invite by email</p>
-          <div class="flex gap-2">
-            <Input
-              v-model="inviteEmail"
-              type="email"
-              placeholder="partner@example.com"
-              class="h-9 rounded-lg bg-secondary"
-            />
-            <Button size="sm" :disabled="busy" @click="onInvite">Invite</Button>
-          </div>
-          <button
-            v-if="lastInviteToken"
-            type="button"
-            class="text-left text-xs text-primary"
-            @click="copyToken(lastInviteToken)"
-          >
-            Invite code ready — tap to copy
-          </button>
+          <p class="text-xs text-muted-foreground">
+            Invite someone with a QR code or single-use link
+          </p>
+          <Button class="w-full" :disabled="busy || creatingInvite" @click="onInvite">
+            {{ creatingInvite ? "Creating invite…" : "Invite" }}
+          </Button>
 
           <div v-if="household.pending_invites.length" class="mt-2 space-y-2">
             <p class="text-xs text-muted-foreground">Pending invites</p>
@@ -245,15 +275,15 @@ onMounted(load);
               :key="invite.id"
               class="flex items-center justify-between gap-2"
             >
-              <p class="text-sm">{{ invite.email }}</p>
+              <p class="text-sm">{{ inviteLabel(invite) }}</p>
               <div class="flex gap-1">
                 <Button
-                  v-if="invite.token"
+                  v-if="invite.invite_url"
                   size="sm"
                   variant="outline"
-                  @click="copyToken(invite.token!)"
+                  @click="showInvite(invite)"
                 >
-                  Copy
+                  Show QR
                 </Button>
                 <Button size="sm" variant="ghost" :disabled="busy" @click="onRevoke(invite.id)">
                   Revoke
@@ -264,20 +294,27 @@ onMounted(load);
         </div>
 
         <div class="mt-5 space-y-2 border-t border-border pt-4">
-          <p class="text-xs text-muted-foreground">Have an invite code?</p>
+          <p class="text-xs text-muted-foreground">Have an invite link?</p>
           <div class="flex gap-2">
             <Input
-              v-model="inviteCode"
-              placeholder="Paste invite code"
+              v-model="pasteValue"
+              placeholder="Paste invite link"
               class="h-9 rounded-lg bg-secondary"
             />
             <Button
               size="sm"
-              :disabled="busy || !inviteCode.trim()"
+              :disabled="busy || !pasteValue.trim()"
               @click="
-                onAccept(inviteCode.trim()).then(() => {
-                  inviteCode = '';
-                })
+                (() => {
+                  const token = extractInviteToken(pasteValue);
+                  if (!token) {
+                    toast.fromError(new Error('That doesn’t look like an invite link.'));
+                    return;
+                  }
+                  onAccept(token).then(() => {
+                    pasteValue = '';
+                  });
+                })()
               "
             >
               Join
@@ -296,5 +333,45 @@ onMounted(load);
         </Button>
       </template>
     </div>
+
+    <Dialog v-model:open="inviteDialogOpen">
+      <DialogContent class="max-w-sm border-border bg-card">
+        <DialogHeader>
+          <DialogTitle>Invite to household</DialogTitle>
+          <DialogDescription>
+            Scan the QR code or copy the single-use link. Opens the Sous Kit app when installed,
+            otherwise this web app.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="flex justify-center rounded-xl bg-white p-4">
+          <div
+            v-if="creatingInvite || !inviteQrDataUrl"
+            class="flex h-[240px] w-[240px] items-center justify-center text-sm text-muted-foreground"
+          >
+            {{ creatingInvite ? "Creating…" : "Loading QR…" }}
+          </div>
+          <img
+            v-else
+            :src="inviteQrDataUrl"
+            alt="Household invite QR code"
+            class="h-[240px] w-[240px]"
+          />
+        </div>
+
+        <p
+          v-if="inviteUrl"
+          class="break-all text-center text-xs text-muted-foreground"
+          :title="inviteUrl"
+        >
+          {{ inviteUrl }}
+        </p>
+
+        <DialogFooter class="gap-2 sm:justify-stretch">
+          <Button class="w-full" :disabled="!inviteUrl" @click="copyInviteLink">Copy link</Button>
+          <Button variant="outline" class="w-full" @click="inviteDialogOpen = false">Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

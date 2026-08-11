@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # bundle identifier as `aud`. Must match `ios.bundleIdentifier` in
     # mobile/app.config.ts (SOUSKIT_IOS_BUNDLE_ID override).
     APPLE_APP_BUNDLE_ID: str = "com.joelyoung.souskit"
+    # Apple Developer Team ID (10 chars). When set, the API serves
+    # `/.well-known/apple-app-site-association` so Universal Links can open
+    # household join URLs in the iOS app (fallback: web).
+    APPLE_TEAM_ID: str | None = None
+    # Path segment for household join links (paired with FRONTEND_HOST).
+    HOUSEHOLD_JOIN_PATH: str = "/join"
     VUE_STATIC_DIR: str = "dist"
     UPLOAD_DIR: str = "data/uploads"
     LOGS_DIR: str = "data/logs"

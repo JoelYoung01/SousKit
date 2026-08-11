@@ -78,6 +78,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/AccountView.vue")
       },
       {
+        path: "join/:token",
+        name: "join-household",
+        component: () => import("@/views/JoinHouseholdView.vue")
+      },
+      {
         path: "users/:userId(\\d+)",
         name: "public-user",
         component: () => import("@/views/PublicUserView.vue")

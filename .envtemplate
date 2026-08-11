@@ -28,6 +28,15 @@ VITE_GOOGLE_CLIENT_ID=
 # Deployment Environment
 ENVIRONMENT=development
 
+# Public web origin used for household invite links / QR codes
+# (e.g. https://sous-kit.com). Defaults to http://localhost:5173.
+# FRONTEND_HOST=http://localhost:5173
+
+# Apple Developer Team ID — when set, serves
+# /.well-known/apple-app-site-association so Universal Links open join URLs
+# in the Sous Kit iOS app (falls back to the web app otherwise).
+# APPLE_TEAM_ID=
+
 # Extra allowed CORS origins (comma-separated). Add the Expo web preview
 # origin when developing the mobile app against a local backend.
 # BACKEND_CORS_ORIGINS=http://localhost:8081

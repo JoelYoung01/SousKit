@@ -106,6 +106,17 @@ The login screen shows Apple's native sign-in button on iOS devices. Two require
 
 No extra secret is needed: verification uses Apple's public keys.
 
+### Universal Links (household invites)
+
+Invite QR codes and copy-link buttons share an HTTPS URL (`https://<host>/join/<token>`). When the app is installed, iOS should open Sous Kit; otherwise the web join page accepts the invite.
+
+1. Enable **Associated Domains** on the App ID: [Apple Developer → Identifiers](https://developer.apple.com/account/resources/identifiers/list) → select the bundle ID → check *Associated Domains* → Save. `expo prebuild` adds the `applinks:` entitlement from `associatedDomains` in `app.config.ts`.
+2. Set server `APPLE_TEAM_ID` (same 10-char Team ID as the GitHub secret) so the API serves `/.well-known/apple-app-site-association`.
+3. Set server `FRONTEND_HOST` to the public web origin (e.g. `https://sous-kit.com`) so invite URLs use the correct host.
+4. Optional CI/build override: `SOUSKIT_ASSOCIATED_DOMAIN` (host only, no scheme) if it differs from the default `sous-kit.com`.
+
+Custom-scheme links (`souskit://join/<token>`) also route to the same screen for local testing.
+
 ### Face ID unlock
 
 Account → Security → **Face ID unlock** gates the app behind Face ID / Touch ID (`expo-local-authentication`): unlock on cold start and whenever the app returns from the background, with device-passcode fallback and a sign-out escape hatch. The preference is stored in the Keychain; the row is hidden on devices without enrolled biometrics (and on web).

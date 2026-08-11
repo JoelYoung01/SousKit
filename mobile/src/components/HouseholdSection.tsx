@@ -1,3 +1,4 @@
+import { InviteLinkDialog } from "@/components/InviteLinkDialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -8,11 +9,17 @@ import {
   usePendingHouseholdInvites
 } from "@/hooks/use-household";
 import { colors } from "@/lib/colors";
+import {
+  extractInviteToken,
+  inviteLabel,
+  resolveInviteUrl
+} from "@/lib/household-invite";
 import { useSessionStore } from "@/stores/session";
 import { toast } from "@/stores/toast";
+import type { HouseholdInvite } from "@/types";
 import { Users } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, Share, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 export function HouseholdSection() {
   const user = useSessionStore((s) => s.user);
@@ -24,25 +31,41 @@ export function HouseholdSection() {
   const isOwner = household?.my_role === "owner";
   const shared = (household?.member_count ?? 0) > 1;
 
-  const [inviteEmail, setInviteEmail] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<number | null>(null);
-  const [lastInviteToken, setLastInviteToken] = useState<string | null>(null);
-  const [inviteCode, setInviteCode] = useState("");
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [pasteValue, setPasteValue] = useState("");
 
   async function onInvite() {
-    const email = inviteEmail.trim().toLowerCase();
-    if (!email || mutations.invite.isPending) return;
+    if (mutations.invite.isPending || creatingInvite) return;
+    setCreatingInvite(true);
+    setInviteDialogOpen(true);
+    setInviteLink(null);
     try {
-      const invite = await mutations.invite.mutateAsync(email);
-      setInviteEmail("");
-      setLastInviteToken(invite.token ?? null);
-      toast.success(`Invite ready for ${email}.`);
+      const invite = await mutations.invite.mutateAsync();
+      const url = resolveInviteUrl(invite);
+      if (!url) throw new Error("Invite link missing from server response.");
+      setInviteLink(url);
     } catch (error) {
-      toast.fromError(error, "Couldn’t send that invite.");
+      setInviteDialogOpen(false);
+      toast.fromError(error, "Couldn’t create that invite.");
+    } finally {
+      setCreatingInvite(false);
     }
+  }
+
+  function showInvite(invite: HouseholdInvite) {
+    const url = resolveInviteUrl(invite);
+    if (!url) {
+      toast.fromError(new Error("That invite has no link to share."));
+      return;
+    }
+    setInviteLink(url);
+    setInviteDialogOpen(true);
   }
 
   async function onRename() {
@@ -85,16 +108,6 @@ export function HouseholdSection() {
       toast.success("Joined household. Recipes and plans are shared now.");
     } catch (error) {
       toast.fromError(error, "Couldn’t accept that invite.");
-    }
-  }
-
-  async function shareToken(token: string) {
-    try {
-      await Share.share({
-        message: `Join my Sous Kit household with this invite code:\n${token}`
-      });
-    } catch {
-      toast.fromError(new Error("Couldn’t share the invite code."));
     }
   }
 
@@ -204,31 +217,15 @@ export function HouseholdSection() {
 
         {isOwner ? (
           <View className="mt-5 gap-2 border-t border-border pt-4">
-            <Text className="text-xs text-muted-foreground">Invite by email</Text>
-            <View className="flex-row items-center gap-2">
-              <Input
-                value={inviteEmail}
-                onChangeText={setInviteEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                placeholder="partner@example.com"
-                className="h-10 flex-1 rounded-lg bg-secondary"
-              />
-              <Button
-                size="sm"
-                disabled={mutations.invite.isPending}
-                onPress={() => void onInvite()}
-              >
-                Invite
-              </Button>
-            </View>
-            {lastInviteToken ? (
-              <Pressable onPress={() => void shareToken(lastInviteToken)}>
-                <Text className="text-xs text-primary">
-                  Invite code ready — tap to share so they can join in the app
-                </Text>
-              </Pressable>
-            ) : null}
+            <Text className="text-xs text-muted-foreground">
+              Invite someone with a QR code or single-use link
+            </Text>
+            <Button
+              disabled={mutations.invite.isPending || creatingInvite}
+              onPress={() => void onInvite()}
+            >
+              {creatingInvite ? "Creating invite…" : "Invite"}
+            </Button>
 
             {household.pending_invites.length > 0 ? (
               <View className="mt-2 gap-2">
@@ -238,16 +235,10 @@ export function HouseholdSection() {
                     key={invite.id}
                     className="flex-row items-center justify-between gap-2"
                   >
-                    <Text className="flex-1 text-sm">{invite.email}</Text>
-                    {invite.token ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onPress={() => void shareToken(invite.token!)}
-                      >
-                        Share
-                      </Button>
-                    ) : null}
+                    <Text className="flex-1 text-sm">{inviteLabel(invite)}</Text>
+                    <Button size="sm" variant="outline" onPress={() => showInvite(invite)}>
+                      Show QR
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -267,22 +258,25 @@ export function HouseholdSection() {
         ) : null}
 
         <View className="mt-5 gap-2 border-t border-border pt-4">
-          <Text className="text-xs text-muted-foreground">Have an invite code?</Text>
+          <Text className="text-xs text-muted-foreground">Have an invite link?</Text>
           <View className="flex-row items-center gap-2">
             <Input
-              value={inviteCode}
-              onChangeText={setInviteCode}
+              value={pasteValue}
+              onChangeText={setPasteValue}
               autoCapitalize="none"
-              placeholder="Paste invite code"
+              placeholder="Paste invite link"
               className="h-10 flex-1 rounded-lg bg-secondary"
             />
             <Button
               size="sm"
-              disabled={mutations.acceptInvite.isPending || !inviteCode.trim()}
+              disabled={mutations.acceptInvite.isPending || !pasteValue.trim()}
               onPress={() => {
-                const token = inviteCode.trim();
-                if (!token) return;
-                void onAccept(token).then(() => setInviteCode(""));
+                const token = extractInviteToken(pasteValue);
+                if (!token) {
+                  toast.fromError(new Error("That doesn’t look like an invite link."));
+                  return;
+                }
+                void onAccept(token).then(() => setPasteValue(""));
               }}
             >
               Join
@@ -296,6 +290,15 @@ export function HouseholdSection() {
           </Button>
         ) : null}
       </View>
+
+      <InviteLinkDialog
+        visible={inviteDialogOpen}
+        inviteUrl={inviteLink}
+        loading={creatingInvite && !inviteLink}
+        onClose={() => setInviteDialogOpen(false)}
+        onCopied={() => toast.success("Invite link copied.")}
+        onError={(message) => toast.fromError(new Error(message))}
+      />
 
       <ConfirmDialog
         visible={leaveOpen}
