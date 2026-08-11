@@ -108,6 +108,9 @@ class Recipe(BaseIndexedDbModel, table=True):
     public: bool = False
     prep_time: float | None = None
     cover_image_id: int | None = Field(foreign_key="upload.id", default=None)
+    # JSON float array + model id for hybrid semantic search (not exposed in API DTOs).
+    embedding_json: str | None = None
+    embedding_model: str | None = Field(default=None, max_length=120)
 
     created_by: "User" = Relationship()
     household: "Household" = Relationship()

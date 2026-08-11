@@ -26,6 +26,7 @@ from api.core.meal_plan_wizard.session_store import (
     WizardSession,
     WizardStep,
 )
+from api.core.recipe_search import refresh_recipe_embedding
 from api.core.recipe_text import normalize_instruction_newlines
 from api.models import Ingredient, PlannedRecipe, Recipe, User
 
@@ -593,6 +594,8 @@ class MealPlanWizardPipeline:
                     db.add(db_recipe)
                     db.commit()
                     db.refresh(db_recipe)
+
+                refresh_recipe_embedding(db, db_recipe, commit=True)
 
                 recipe_id = db_recipe.id
                 built.created_recipe_id = recipe_id

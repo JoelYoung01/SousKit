@@ -64,6 +64,12 @@ The admin seed also receives `SUPERUSER_GID` when set.
 - Routes under `/api/meal-plan-wizard/`. Pipeline stages: create session → ideate (SSE) → select → build (SSE) → commit.
 - Without `OPENROUTER_API_KEY`, the backend uses a deterministic stub LLM (`api/core/llm/client.py`). Set the key to call OpenRouter (`api/core/llm/client.py` → `OpenRouterLlmClient`). Optional `OPENROUTER_MODEL` defaults to `inception/mercury-2`. Tool helpers for user-scoped recipe search live in `api/core/llm/tools.py`.
 
+## Recipe semantic search
+
+- `GET /api/recipe/search/?searchText=...` runs hybrid lexical (ILIKE) + embedding cosine ranking over recipes the user can access (`api/core/recipe_search.py`).
+- Embeddings are stored on `Recipe.embedding_json` / `embedding_model` and refreshed on create/update/import/AI-edit/ingredient changes (and lazily backfilled during search).
+- With `OPENROUTER_API_KEY`, vectors come from OpenRouter (`OPENROUTER_EMBEDDING_MODEL`, default `openai/text-embedding-3-small`, `OPENROUTER_EMBEDDING_DIMENSIONS=384`). Without a key, a deterministic local hashing embedder keeps the hybrid path working in dev.
+
 ## Recipe import from URL
 
 - `POST /api/recipe/import-from-url/` with `{ "url": "https://..." }` (auth required). Fetches the page (SSRF-safe), extracts via `recipe-scrapers` / schema.org first, then falls back to OpenRouter when structured markup is missing and `OPENROUTER_API_KEY` is set. Creates a private recipe + ingredients (optional cover via `IMAGE_GEN_PROVIDER`) and returns `RecipeDetail`.

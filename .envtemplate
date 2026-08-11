@@ -57,12 +57,16 @@ SUPERUSER_GID=
 # SEED_TEST_PASSWORD=testpass123
 
 # Optional OpenRouter credentials for the meal-plan wizard LLM,
-# recipe detail AI-edit, and recipe URL-import fallback (when a page
-# has no schema.org markup). When unset, the wizard and AI-edit use a
-# deterministic stub client; URL import still works for schema.org /
-# supported recipe sites without a key.
+# recipe detail AI-edit, recipe URL-import fallback (when a page
+# has no schema.org markup), and recipe library semantic search
+# embeddings. When unset, the wizard and AI-edit use a deterministic
+# stub client; URL import still works for schema.org / supported
+# recipe sites without a key; search falls back to hybrid lexical +
+# local hashing embeddings.
 # OPENROUTER_API_KEY=
 # OPENROUTER_MODEL=inception/mercury-2
+# OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+# OPENROUTER_EMBEDDING_DIMENSIONS=384
 
 # Cover images for newly generated recipes (meal-plan wizard commit).
 # Providers: stub | broke (default, free Openverse CC0/PDM search) | qwen
