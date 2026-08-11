@@ -80,9 +80,9 @@ export default function PlannerScreen() {
 
   const selectedKey = toDateKey(selectedDate);
   const currentPlannedRecipes = plannedByDay.get(selectedKey) ?? [];
-  const currentWeekGapDays = (weeks[0]?.days ?? []).filter(
-    (d) => (plannedByDay.get(toDateKey(d)) ?? []).length === 0
-  );
+
+  const gapDaysForWeek = (days: Date[]) =>
+    days.filter((d) => (plannedByDay.get(toDateKey(d)) ?? []).length === 0);
 
   const formattedSelectedDate = useMemo(() => {
     const date = selectedDate;
@@ -232,31 +232,33 @@ export default function PlannerScreen() {
           paddingBottom: 88
         }}
       >
-        <View className="flex-row items-start justify-between gap-3">
-          <View>
-            <Text className="font-sans-bold text-xl">Planner</Text>
-            <Text className="mt-1 text-sm text-muted-foreground">
-              This week up top — scroll for more
-            </Text>
-          </View>
-          <Button size="sm" className="shrink-0" onPress={() => openFill(currentWeekGapDays)}>
-            <Sparkles size={14} color={colors.foreground} />
-            Fill gaps
-          </Button>
-        </View>
+        <Text className="font-sans-bold text-xl">Planner</Text>
 
         <View className="mt-4 gap-5">
           {weeks.map((week) => {
             const plannedCount = week.days.filter(
               (d) => (plannedByDay.get(toDateKey(d)) ?? []).length
             ).length;
+            const weekGapDays = gapDaysForWeek(week.days);
             return (
               <View key={week.weekIndex} className="gap-2">
-                <View className="border-b border-border/80 py-2">
-                  <Text className="font-sans-semibold text-sm">
-                    {weekLabel(week.weekStart, week.weekIndex)}
-                  </Text>
-                  <Text className="text-[11px] text-faint">{plannedCount} / 7 planned</Text>
+                <View className="flex-row items-center justify-between gap-3 border-b border-border/80 py-2">
+                  <View className="min-w-0 flex-1">
+                    <Text className="font-sans-semibold text-sm">
+                      {weekLabel(week.weekStart, week.weekIndex)}
+                    </Text>
+                    <Text className="text-[11px] text-faint">{plannedCount} / 7 planned</Text>
+                  </View>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0"
+                    disabled={!weekGapDays.length}
+                    onPress={() => openFill(weekGapDays)}
+                  >
+                    <Sparkles size={14} color={colors.foreground} />
+                    Fill gaps
+                  </Button>
                 </View>
 
                 <View className="overflow-hidden rounded-xl border border-border bg-card">
