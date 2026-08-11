@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, update
 from sqlalchemy.orm import selectinload
-from sqlmodel import and_, or_, select
+from sqlmodel import select
 
 from api.core.authentication import CurrentUserDep, verify_access_token
 from api.core.database import SessionDep
@@ -23,6 +23,11 @@ from api.core.recipe_ai_edit import (
 )
 from api.core.recipe_import import import_recipe_from_url
 from api.core.recipe_import.fetch import RecipeImportError
+from api.core.recipe_search import (
+    refresh_recipe_embedding,
+    refresh_recipe_embedding_by_id,
+    search_accessible_recipes,
+)
 from api.models import Ingredient, Recipe
 from api.schemas import (
     CountResponse,
@@ -119,6 +124,13 @@ async def import_recipe_from_url_route(
         .where(Recipe.id == db_recipe.id)
         .options(*_recipe_detail_options())
     ).first()
+    if recipe is not None:
+        refresh_recipe_embedding(session, recipe, commit=True)
+        recipe = session.exec(
+            select(Recipe)
+            .where(Recipe.id == db_recipe.id)
+            .options(*_recipe_detail_options())
+        ).first()
     return recipe
 
 
@@ -265,49 +277,19 @@ def search_recipes(
     searchText: str,
     current_user: CurrentUserDep,
     session: SessionDep,
-    offset=0,
+    offset: int = 0,
     limit: Annotated[int, Query(le=100)] = 50,
 ):
-    household, _ = require_membership(session, current_user)
-    access = recipe_access_filter(household.id)
-
-    if not searchText:
-        recipes = session.exec(
-            select(Recipe)
-            .where(Recipe.public)
-            .options(selectinload(Recipe.cover_image))
-            .limit(25)
-        ).all()
-        return recipes
-
-    query = (
-        select(Recipe)
-        .distinct()
-        .join(Recipe.ingredients, isouter=True)
-        .where(
-            and_(
-                access,
-                or_(
-                    Recipe.name.ilike(f"%{searchText}%"),
-                    Recipe.description.ilike(f"%{searchText}%"),
-                    Recipe.instructions.ilike(f"%{searchText}%"),
-                    Recipe.notes.ilike(f"%{searchText}%"),
-                    Recipe.ingredients.any(
-                        or_(
-                            Ingredient.name.ilike(f"%{searchText}%"),
-                            Ingredient.details.ilike(f"%{searchText}%"),
-                        )
-                    ),
-                ),
-            )
-        )
-        .options(selectinload(Recipe.cover_image))
-        .offset(offset)
-        .limit(limit)
+    """Hybrid lexical + semantic search over recipes the user can access."""
+    # Membership is required for the library UX; also ensures household exists.
+    require_membership(session, current_user)
+    return search_accessible_recipes(
+        session,
+        current_user,
+        searchText,
+        offset=offset,
+        limit=limit,
     )
-
-    recipes = session.exec(query).all()
-    return recipes
 
 
 @router.post(
@@ -326,6 +308,8 @@ def create_recipe(
     db_recipe = Recipe.model_validate(rec_dict)
     session.add(db_recipe)
     session.commit()
+    session.refresh(db_recipe)
+    refresh_recipe_embedding(session, db_recipe, commit=True)
     session.refresh(db_recipe)
     return db_recipe
 
@@ -373,6 +357,21 @@ def update_recipe(
     updated = session.exec(
         select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
     ).first()
+    if updated is not None:
+        content_keys = {
+            "name",
+            "description",
+            "instructions",
+            "notes",
+            "prep_time",
+        }
+        if content_keys.intersection(values):
+            refresh_recipe_embedding(session, updated, commit=True)
+            updated = session.exec(
+                select(Recipe)
+                .where(Recipe.id == recipe_id)
+                .options(*_recipe_detail_options())
+            ).first()
     return updated
 
 
@@ -423,6 +422,7 @@ async def ai_edit_recipe(
         user_id=current_user.id,
         session=session,
     )
+    refresh_recipe_embedding_by_id(session, recipe_id)
 
     recipe = session.exec(
         select(Recipe)

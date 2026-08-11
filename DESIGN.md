@@ -89,6 +89,7 @@ Keep motion intentional and light (app-wide):
 
 1. Sheet slide-up + scrim fade.
 2. FAB “+” → “×” rotate.
+2a. Recipes library search FAB (bottom-right) expands into a full-width bar that sticks above the keyboard.
 3. Subtle press/active opacity on action rows and tab items.
 4. Page transitions: short fade + slight vertical rise (~180ms) between shell routes.
 5. Skeleton pulse (`animate-pulse` muted bars) while list/hero data loads — never blank the page behind “Loading…”.

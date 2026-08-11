@@ -111,10 +111,13 @@ class Settings(BaseSettings):
 
     SUPERUSER_GID: str
 
-    # Optional OpenRouter credentials for meal-plan wizard LLM.
-    # When unset, the wizard uses a deterministic stub client.
+    # Optional OpenRouter credentials for meal-plan wizard LLM and embeddings.
+    # When unset, the wizard uses a deterministic stub client and recipe search
+    # falls back to a local hashing embedder (hybrid lexical + stub vectors).
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_MODEL: str = "inception/mercury-2"
+    OPENROUTER_EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
+    OPENROUTER_EMBEDDING_DIMENSIONS: int = 384
 
     # Cover-image provider for newly generated recipes.
     #   stub  — no network; leave cover unset

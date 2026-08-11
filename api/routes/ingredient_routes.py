@@ -7,6 +7,7 @@ from sqlmodel import select
 from api.core.authentication import CurrentUserDep, verify_access_token
 from api.core.database import SessionDep
 from api.core.household import user_can_edit_recipe
+from api.core.recipe_search import refresh_recipe_embedding_by_id
 from api.models import Ingredient, Recipe
 from api.schemas import IngredientCreate, IngredientDetail, IngredientUpdate
 
@@ -45,6 +46,7 @@ def create_ingredient(
     session.add(db_ingredient)
     session.commit()
     session.refresh(db_ingredient)
+    refresh_recipe_embedding_by_id(session, db_ingredient.recipe_id)
     return db_ingredient
 
 
@@ -84,6 +86,7 @@ def update_ingredient(
     session.exec(update_stmt)
     session.commit()
     session.refresh(existing_ingredient)
+    refresh_recipe_embedding_by_id(session, existing_ingredient.recipe_id)
     return existing_ingredient
 
 
@@ -107,5 +110,7 @@ def delete_ingredient(
             detail="You can only remove ingredients from household recipes.",
         )
 
+    recipe_id = existing_ingredient.recipe_id
     session.delete(existing_ingredient)
     session.commit()
+    refresh_recipe_embedding_by_id(session, recipe_id)

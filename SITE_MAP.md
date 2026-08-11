@@ -22,7 +22,7 @@ Layout: `layouts/AppShell.vue` (tab bar + add sheet). Children render in the she
 |------|------|------|-----|-------|
 | `/` | — | — | — | Redirect → `/home` |
 | `/home` | `home` | `views/HomeView.vue` | Home | Tonight hero, week strip, 2×2 action cards (Create · Import · Find · Grocery) |
-| `/recipes` | `recipes` | `views/recipes/RecipesView.vue` | Recipes | Results start at top; search floats at the bottom above the tab bar; swipe a row left to delete (owned), right to schedule (next open night preselected) |
+| `/recipes` | `recipes` | `views/recipes/RecipesView.vue` | Recipes | Results start at top; search is a bottom-right FAB that expands full-width and sticks above the keyboard; hybrid semantic + keyword search; swipe a row left to delete (owned), right to schedule (next open night preselected) |
 | `/planner` | `planner` | `views/planner/PlannerView.vue` | Planner | Sliding week calendar; empty night opens recipe search + Create wizard CTA; filled night opens recipe detail; swipe left on a filled night to unplan |
 | `/planner/fill` | `planner-fill` | `views/planner/MealPlanWizardView.vue` | Planner | Fill-gaps / plan-week LLM wizard; `?mode=recipe` = Create flow (single recipe, optional day assign at the end) |
 | `/list` | `list` | `views/list/ShoppingListView.vue` | Grocery | Auto grocery list from planned meals (next 7 days); tap a row to cross off (2s undo), then it hides; swipe left for view/delete |
@@ -75,7 +75,7 @@ Preserve bookmarks from the Vuetify app:
 
 ## Feature coverage (no new product scope)
 
-- **Recipe storage** — list, search, detail, create/edit, delete, cover image, public flag
+- **Recipe storage** — list, hybrid semantic/keyword search, detail, create/edit, delete, cover image, public flag
 - **Meal planning** — plan/unplan by day; home week strip + tonight hero; fill-gaps wizard (goals / diet / ingredients → idea shortlist → recipe build → plan commit; OpenRouter when `OPENROUTER_API_KEY` is set, else stub LLM)
 - **Create recipe** — home Create card → `/planner/fill?mode=recipe` (single-recipe LLM flow); optional day assign after review; skip keeps the recipe unplanned
 - **Import recipe** — paste a recipe website URL (`POST /recipe/import-from-url/`); schema.org scrape first, OpenRouter LLM fallback when configured; photo scan still stubbed; social video links out of scope for v1

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlmodel import or_, select
-
 from api.core.database import SessionDep
-from api.core.household import get_membership, recipe_access_filter, user_can_access_recipe
+from api.core.household import get_membership, user_can_access_recipe
+from api.core.recipe_search import search_user_recipes_dicts
 from api.models import Recipe, User
 
 
@@ -19,8 +18,9 @@ def tool_definitions() -> list[dict[str, Any]]:
             "function": {
                 "name": "search_user_recipes",
                 "description": (
-                    "Search recipes the user can access (household or public) "
-                    "by name/description/ingredient text."
+                    "Semantic + keyword search over recipes the user can access "
+                    "(household or public) by meaning, name, description, "
+                    "or ingredients."
                 ),
                 "parameters": {
                     "type": "object",
@@ -53,34 +53,7 @@ def search_user_recipes(
     query: str,
     limit: int = 8,
 ) -> list[dict[str, Any]]:
-    q = (query or "").strip()
-    membership = get_membership(session, user.id)
-    if membership:
-        access = recipe_access_filter(membership.household_id)
-    else:
-        access = or_(Recipe.public, Recipe.created_by_id == user.id)
-    stmt = select(Recipe).where(access)
-    if q:
-        like = f"%{q}%"
-        stmt = stmt.where(
-            or_(
-                Recipe.name.ilike(like),
-                Recipe.description.ilike(like),
-                Recipe.instructions.ilike(like),
-            )
-        )
-    recipes = session.exec(stmt.limit(max(1, min(limit, 25)))).all()
-    household_id = membership.household_id if membership else None
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "description": r.description,
-            "prep_time": r.prep_time,
-            "owned": household_id is not None and r.household_id == household_id,
-        }
-        for r in recipes
-    ]
+    return search_user_recipes_dicts(session, user, query, limit=limit)
 
 
 def get_accessible_recipe(

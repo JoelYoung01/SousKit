@@ -130,9 +130,8 @@ export default function PlannerScreen() {
   const [pickingId, setPickingId] = useState<number | null>(null);
   const recipeSearch = useRecipeSearch(searchText);
   const searchResults: RecipeCard[] = useMemo(() => {
-    if (searchText.trim()) return [...(recipeSearch.data ?? [])].sort(
-      (a, b) => new Date(b.created_on).getTime() - new Date(a.created_on).getTime()
-    );
+    // Preserve API relevance order for search results.
+    if (searchText.trim()) return recipeSearch.data ?? [];
     return recipeList.data ?? [];
   }, [searchText, recipeSearch.data, recipeList.data]);
 

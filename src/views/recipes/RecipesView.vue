@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import RecipeCard from "@/components/RecipeCard.vue";
 import RecipeCardSkeleton from "@/components/RecipeCardSkeleton.vue";
+import RecipeSearchFab from "@/components/recipes/RecipeSearchFab.vue";
 import ScheduleRecipeDialog from "@/components/recipes/ScheduleRecipeDialog.vue";
 import SwipeRow from "@/components/SwipeRow.vue";
 import { Button } from "@/components/ui/button";
@@ -12,14 +13,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { useRecipesStore } from "@/stores/recipes";
 import { useSessionStore } from "@/stores/session";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import type { RecipeCard as RecipeCardType } from "@/types";
 import { del, toast } from "@/utils";
 import { fetchHousehold } from "@/utils/household";
-import { CalendarPlus, Search, Trash2 } from "@lucide/vue";
+import { CalendarPlus, Trash2 } from "@lucide/vue";
 import { computed, onActivated, onMounted, ref, watch } from "vue";
 
 defineOptions({ name: "RecipesView" });
@@ -39,11 +39,8 @@ const deleteOpen = ref(false);
 const deleting = ref(false);
 
 const displayList = computed(() => {
-  if (searchResults.value) {
-    return [...searchResults.value].sort(
-      (a, b) => new Date(b.created_on).getTime() - new Date(a.created_on).getTime()
-    );
-  }
+  // Preserve API relevance order for search; library browse stays newest-first.
+  if (searchResults.value) return searchResults.value;
   return recipesStore.sorted;
 });
 
@@ -195,24 +192,7 @@ onActivated(() => {
       </template>
     </div>
 
-    <!-- Search docked above the tab bar (clear of the raised FAB), floating over the list -->
-    <div class="pointer-events-none fixed bottom-0 left-1/2 z-40 w-full max-w-md -translate-x-1/2">
-      <div
-        class="bg-gradient-to-t from-background via-background/80 to-transparent px-4 pt-10 pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
-      >
-        <div class="pointer-events-auto relative">
-          <Search
-            class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint"
-          />
-          <Input
-            v-model="searchText"
-            type="search"
-            placeholder="Search recipes…"
-            class="h-11 rounded-xl border-border bg-card pl-10"
-          />
-        </div>
-      </div>
-    </div>
+    <RecipeSearchFab v-model="searchText" />
 
     <ScheduleRecipeDialog v-model:open="scheduleOpen" :recipe="scheduleTarget" />
 
