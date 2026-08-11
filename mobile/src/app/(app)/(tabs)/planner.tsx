@@ -17,8 +17,8 @@ import type { PlannedRecipeDetail, RecipeCard } from "@/types";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { CalendarDays, Search, Sparkles, Trash2 } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -128,6 +128,7 @@ export default function PlannerScreen() {
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [pickingId, setPickingId] = useState<number | null>(null);
+  const searchInputRef = useRef<TextInput>(null);
   const recipeSearch = useRecipeSearch(searchText);
   const searchResults: RecipeCard[] = useMemo(() => {
     // Preserve API relevance order for search results.
@@ -140,6 +141,14 @@ export default function PlannerScreen() {
     setSearchText("");
     setSearchSheetOpen(true);
   };
+
+  // Focus search (and raise the keyboard) once the sheet has mounted/animated in.
+  // autoFocus alone is unreliable inside a Modal on iOS.
+  useEffect(() => {
+    if (!searchSheetOpen) return;
+    const timer = setTimeout(() => searchInputRef.current?.focus(), 320);
+    return () => clearTimeout(timer);
+  }, [searchSheetOpen]);
 
   const onDayPress = (day: Date, dayPlans: PlannedRecipeDetail[]) => {
     tapHaptic();
@@ -441,99 +450,105 @@ export default function PlannerScreen() {
 
       {/* Empty-night search sheet */}
       <Sheet
+        fullHeight
         visible={searchSheetOpen}
         onClose={() => {
           setSearchSheetOpen(false);
           setSearchText("");
         }}
       >
-        <Text className="px-1 pb-1 font-sans-semibold text-lg">Plan this night</Text>
-        <Text className="px-1 pb-3 text-sm text-muted-foreground">
-          Search your recipes, or create a new one with the wizard.
-        </Text>
-        <View className="relative mb-3">
-          <View className="absolute left-3 top-0 z-10 h-11 justify-center">
-            <Search size={16} color={colors.faint} />
+        <View className="min-h-0 flex-1">
+          <Text className="px-1 pb-1 font-sans-semibold text-lg">Plan this night</Text>
+          <Text className="px-1 pb-3 text-sm text-muted-foreground">
+            Search your recipes, or create a new one with the wizard.
+          </Text>
+          <View className="relative mb-3">
+            <View className="absolute left-3 top-0 z-10 h-11 justify-center">
+              <Search size={16} color={colors.faint} />
+            </View>
+            <Input
+              ref={searchInputRef}
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder="Search recipes…"
+              className="h-11 rounded-xl bg-secondary/40 pl-10"
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              autoFocus
+            />
           </View>
-          <Input
-            value={searchText}
-            onChangeText={setSearchText}
-            placeholder="Search recipes…"
-            className="h-11 rounded-xl bg-secondary/40 pl-10"
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-          />
-        </View>
-        <ScrollView
-          style={{ maxHeight: sheetListMaxHeight }}
-          contentContainerClassName="gap-2 pb-2"
-          keyboardShouldPersistTaps="handled"
-        >
-          {recipeList.isPending || (searchText.trim() && recipeSearch.isFetching && !searchResults.length) ? (
-            [0, 1, 2, 3].map((n) => (
-              <View
-                key={n}
-                className="flex-row items-center gap-3 rounded-xl border border-border px-2 py-2"
-              >
-                <Skeleton className="h-12 w-12 rounded-lg" />
-                <View className="flex-1 gap-1.5">
-                  <Skeleton className="h-3.5 w-2/3" />
-                  <Skeleton className="h-2.5 w-full" />
-                </View>
-              </View>
-            ))
-          ) : searchResults.length ? (
-            searchResults.map((recipe) => (
-              <Pressable
-                key={recipe.id}
-                accessibilityRole="button"
-                disabled={pickingId !== null}
-                onPress={() => void pickRecipeForNight(recipe)}
-                className="flex-row items-center gap-3 rounded-xl border border-border bg-secondary/40 px-2 py-2 active:opacity-80"
-              >
-                <Image
-                  source={mediaSource(recipe.cover_image?.url)}
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 10,
-                    backgroundColor: colors.muted
-                  }}
-                  contentFit="cover"
-                />
-                <View className="min-w-0 flex-1">
-                  <Text className="font-sans-semibold text-sm" numberOfLines={1}>
-                    {recipe.name}
-                  </Text>
-                  <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                    {recipe.description}
-                  </Text>
-                </View>
-              </Pressable>
-            ))
-          ) : (
-            <Text className="py-6 text-center text-sm text-muted-foreground">
-              {searchText.trim()
-                ? "No recipes matched that search."
-                : "No recipes yet — create one below."}
-            </Text>
-          )}
-        </ScrollView>
-        <View className="mt-2 gap-2">
-          <Button
-            className="w-full"
-            onPress={() => {
-              setSearchSheetOpen(false);
-              openFill([selectedDate]);
-            }}
+          <ScrollView
+            className="min-h-0 flex-1"
+            contentContainerClassName="gap-2 pb-2"
+            keyboardShouldPersistTaps="handled"
           >
-            <Sparkles size={14} color={colors.foreground} />
-            Create with wizard
-          </Button>
-          <Button variant="outline" className="w-full" onPress={() => setSearchSheetOpen(false)}>
-            Cancel
-          </Button>
+            {recipeList.isPending ||
+            (searchText.trim() && recipeSearch.isFetching && !searchResults.length) ? (
+              [0, 1, 2, 3].map((n) => (
+                <View
+                  key={n}
+                  className="flex-row items-center gap-3 rounded-xl border border-border px-2 py-2"
+                >
+                  <Skeleton className="h-12 w-12 rounded-lg" />
+                  <View className="flex-1 gap-1.5">
+                    <Skeleton className="h-3.5 w-2/3" />
+                    <Skeleton className="h-2.5 w-full" />
+                  </View>
+                </View>
+              ))
+            ) : searchResults.length ? (
+              searchResults.map((recipe) => (
+                <Pressable
+                  key={recipe.id}
+                  accessibilityRole="button"
+                  disabled={pickingId !== null}
+                  onPress={() => void pickRecipeForNight(recipe)}
+                  className="flex-row items-center gap-3 rounded-xl border border-border bg-secondary/40 px-2 py-2 active:opacity-80"
+                >
+                  <Image
+                    source={mediaSource(recipe.cover_image?.url)}
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 10,
+                      backgroundColor: colors.muted
+                    }}
+                    contentFit="cover"
+                  />
+                  <View className="min-w-0 flex-1">
+                    <Text className="font-sans-semibold text-sm" numberOfLines={1}>
+                      {recipe.name}
+                    </Text>
+                    <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+                      {recipe.description}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))
+            ) : (
+              <Text className="py-6 text-center text-sm text-muted-foreground">
+                {searchText.trim()
+                  ? "No recipes matched that search."
+                  : "No recipes yet — create one below."}
+              </Text>
+            )}
+          </ScrollView>
+          <View className="mt-2 gap-2">
+            <Button
+              className="w-full"
+              onPress={() => {
+                setSearchSheetOpen(false);
+                openFill([selectedDate]);
+              }}
+            >
+              <Sparkles size={14} color={colors.foreground} />
+              Create with wizard
+            </Button>
+            <Button variant="outline" className="w-full" onPress={() => setSearchSheetOpen(false)}>
+              Cancel
+            </Button>
+          </View>
         </View>
       </Sheet>
 
