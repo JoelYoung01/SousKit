@@ -188,7 +188,6 @@ class RecipeUpdate(BaseModel):
     description: str | None = None
     instructions: str | None = None
     notes: str | None = None
-    created_on: datetime | None = None
     public: bool | None = None
     prep_time: float | None = None
     cover_image_id: int | None = None

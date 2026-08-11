@@ -78,7 +78,7 @@ def update_ingredient(
     update_stmt = (
         update(Ingredient)
         .where(Ingredient.id == ingredient_id)
-        .values(**ingredient.model_dump())
+        .values(**ingredient.model_dump(exclude_unset=True))
         .execution_options(synchronize_session="fetch")
     )
     session.exec(update_stmt)

@@ -49,7 +49,6 @@ export interface RecipeCreate {
   description: string;
   instructions: string;
   notes?: string;
-  created_on: string;
   public: boolean;
   prep_time?: number;
   cover_image_id?: number;
