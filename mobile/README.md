@@ -119,7 +119,7 @@ Custom-scheme links (`souskit://join/<token>`) also route to the same screen for
 
 ### Face ID unlock
 
-Account → Security → **Face ID unlock** gates the app behind Face ID / Touch ID (`expo-local-authentication`): unlock on cold start and whenever the app returns from the background, with device-passcode fallback and a sign-out escape hatch. The preference is stored in the Keychain; the row is hidden on devices without enrolled biometrics (and on web).
+Account → Security → **Face ID unlock** gates the app behind Face ID / Touch ID (`expo-local-authentication`): prompts after the app has been away for an hour (cold start or return from background), with device-passcode fallback and a sign-out escape hatch. Returning within the hour resets the timer. The preference is stored in the Keychain; the row is hidden on devices without enrolled biometrics (and on web).
 
 ### Google sign-in on iOS (optional)
 
