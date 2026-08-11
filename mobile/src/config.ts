@@ -8,7 +8,7 @@
 const envApiUrl = process.env.EXPO_PUBLIC_API_URL;
 
 /**
- * Base URL of the Sous Kit API, e.g. https://recipe-db.joelyoung.dev/api.
+ * Base URL of the Sous Kit API, e.g. https://sous-kit.com/api.
  * A native app needs an absolute URL, so ignore empty or relative values
  * (CI passes unset GitHub vars through as empty strings, and the web app's
  * API_URL var is the relative `/api`).
@@ -18,7 +18,7 @@ export const API_URL: string =
     ? envApiUrl
     : __DEV__
       ? "http://localhost:8000/api"
-      : "https://recipe-db.joelyoung.dev/api";
+      : "https://sous-kit.com/api";
 
 /** Origin the API is served from — used to resolve relative upload URLs. */
 export const API_ORIGIN: string = API_URL.replace(/\/api\/?$/, "");

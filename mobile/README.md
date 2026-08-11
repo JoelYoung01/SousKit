@@ -112,8 +112,8 @@ Invite QR codes and copy-link buttons share an HTTPS URL (`https://<host>/join/<
 
 1. Enable **Associated Domains** on the App ID: [Apple Developer → Identifiers](https://developer.apple.com/account/resources/identifiers/list) → select the bundle ID → check *Associated Domains* → Save. `expo prebuild` adds the `applinks:` entitlement from `associatedDomains` in `app.config.ts`.
 2. Set server `APPLE_TEAM_ID` (same 10-char Team ID as the GitHub secret) so the API serves `/.well-known/apple-app-site-association`.
-3. Set server `FRONTEND_HOST` to the public web origin (e.g. `https://recipe-db.joelyoung.dev`) so invite URLs use the correct host.
-4. Optional CI/build override: `SOUSKIT_ASSOCIATED_DOMAIN` (host only, no scheme) if it differs from the default `recipe-db.joelyoung.dev`.
+3. Set server `FRONTEND_HOST` to the public web origin (e.g. `https://sous-kit.com`) so invite URLs use the correct host.
+4. Optional CI/build override: `SOUSKIT_ASSOCIATED_DOMAIN` (host only, no scheme) if it differs from the default `sous-kit.com`.
 
 Custom-scheme links (`souskit://join/<token>`) also route to the same screen for local testing.
 

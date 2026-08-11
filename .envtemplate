@@ -29,7 +29,7 @@ VITE_GOOGLE_CLIENT_ID=
 ENVIRONMENT=development
 
 # Public web origin used for household invite links / QR codes
-# (e.g. https://recipe-db.joelyoung.dev). Defaults to http://localhost:5173.
+# (e.g. https://sous-kit.com). Defaults to http://localhost:5173.
 # FRONTEND_HOST=http://localhost:5173
 
 # Apple Developer Team ID — when set, serves

@@ -11,12 +11,12 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
  *   provisioning profile used to sign release builds).
  * - SOUSKIT_IOS_BUILD_NUMBER — CFBundleVersion; unique per TestFlight upload.
  * - SOUSKIT_ASSOCIATED_DOMAIN — host for Universal Links (no scheme), e.g.
- *   recipe-db.joelyoung.dev. Enables https join URLs to open the app.
+ *   sous-kit.com. Enables https join URLs to open the app.
  * - EXPO_PUBLIC_API_URL    — API base URL baked into the JS bundle
  *   (see src/config.ts for defaults).
  */
 const associatedDomain =
-  process.env.SOUSKIT_ASSOCIATED_DOMAIN || "recipe-db.joelyoung.dev";
+  process.env.SOUSKIT_ASSOCIATED_DOMAIN || "sous-kit.com";
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,

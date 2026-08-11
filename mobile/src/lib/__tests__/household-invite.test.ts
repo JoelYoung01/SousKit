@@ -2,7 +2,7 @@ import { buildInviteUrl, extractInviteToken, inviteLabel, resolveInviteUrl } fro
 
 describe("extractInviteToken", () => {
   it("parses https join paths", () => {
-    expect(extractInviteToken("https://recipe-db.joelyoung.dev/join/abc123XYZ_-")).toBe(
+    expect(extractInviteToken("https://sous-kit.com/join/abc123XYZ_-")).toBe(
       "abc123XYZ_-"
     );
   });
