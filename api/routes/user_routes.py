@@ -35,7 +35,7 @@ def update_user(
     update_stmt = (
         update(User)
         .where(User.id == user_id)
-        .values(**user_update.model_dump())
+        .values(**user_update.model_dump(exclude_unset=True))
         .execution_options(synchronize_session="fetch")
     )
     session.exec(update_stmt)

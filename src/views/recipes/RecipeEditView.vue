@@ -36,7 +36,6 @@ const form = reactive<Partial<RecipeCreate>>({
   description: undefined,
   instructions: undefined,
   notes: undefined,
-  created_on: undefined,
   public: false,
   prep_time: undefined,
   cover_image_id: undefined
