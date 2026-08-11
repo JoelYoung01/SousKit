@@ -110,6 +110,7 @@ export default function RecipesScreen() {
         )
       }
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     />
   );
 }

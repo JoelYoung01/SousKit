@@ -3,6 +3,7 @@ import { tapHaptic } from "@/lib/haptics";
 import { BookOpen, CalendarDays, House, Plus, ShoppingCart } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Animated, Pressable, View } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "./ui/text";
 
@@ -41,6 +42,7 @@ export function AppTabBar({
   onAddPress
 }: TabBarProps & { addOpen: boolean; onAddPress: () => void }) {
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const [rotation] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
@@ -52,6 +54,10 @@ export function AppTabBar({
   }, [addOpen, rotation]);
 
   const rotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "45deg"] });
+
+  // Custom tab bar isn't wired to tabBarHideOnKeyboard — hide it ourselves so
+  // search fields (Recipes, planner sheets) aren't squeezed above the keyboard.
+  if (keyboardVisible) return null;
 
   const pressTab = (index: number) => {
     const route = state.routes[index]!;

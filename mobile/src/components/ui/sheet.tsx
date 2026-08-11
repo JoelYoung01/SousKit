@@ -16,6 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 /**
  * Bottom sheet: scrim fade + panel slide, drag-down on the handle to close.
  * Lifts with the keyboard via KeyboardStickyView so inputs stay visible.
+ * Tall sheets should put scrollable lists in their own ScrollView (not the
+ * whole body) so action rows can stay pinned above the keyboard.
  * Mirrors the web app's AddMenuSheet mechanics.
  */
 export function Sheet({
@@ -132,10 +134,10 @@ export function Sheet({
           <KeyboardStickyView style={{ maxHeight: panelMaxHeight }}>
             <View
               className={cn(
-                "rounded-t-[20px] border border-b-0 border-border bg-card px-4",
+                "overflow-hidden rounded-t-[20px] border border-b-0 border-border bg-card px-4",
                 className
               )}
-              style={{ paddingBottom: insets.bottom + 12 }}
+              style={{ maxHeight: panelMaxHeight, paddingBottom: insets.bottom + 12 }}
             >
               <View {...panResponder.panHandlers} className="items-center py-3">
                 <View className="h-1.5 w-10 rounded-full bg-border" />
