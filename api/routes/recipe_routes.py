@@ -245,9 +245,7 @@ def get_recipe_by_id(
     session: SessionDep,
 ):
     recipe = session.exec(
-        select(Recipe)
-        .where(Recipe.id == recipe_id)
-        .options(*_recipe_detail_options())
+        select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
     ).first()
     if not recipe:
         raise HTTPException(
@@ -356,16 +354,26 @@ def update_recipe(
             detail="You can only edit recipes in your household.",
         )
 
+    values = recipe.model_dump(exclude_unset=True)
+    if not values:
+        raise HTTPException(
+            status_code=400,
+            detail="No recipe fields were provided to update.",
+        )
+
     update_stmt = (
         update(Recipe)
         .where(Recipe.id == recipe_id)
-        .values(**recipe.model_dump())
+        .values(**values)
         .execution_options(synchronize_session="fetch")
     )
     session.exec(update_stmt)
     session.commit()
-    session.refresh(existing_recipe)
-    return existing_recipe
+
+    updated = session.exec(
+        select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
+    ).first()
+    return updated
 
 
 @router.post(
