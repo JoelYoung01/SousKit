@@ -286,6 +286,271 @@ class MealPlanWizardPipeline:
         session.step = "build"
         return session
 
+    async def run_freeform_build(
+        self,
+        session: WizardSession,
+        db: SessionDep,
+        user: User,
+        *,
+        prompt: str,
+        refinement: str | None = None,
+        idea_ids: list[str] | None = None,
+    ) -> AsyncIterator[ProgressEvent]:
+        """Build recipes directly from a single free-text prompt (skips ideate/select)."""
+        n = session.day_count
+        if n < 1:
+            yield ProgressEvent(
+                stage="build",
+                status="error",
+                message="No days selected.",
+                progress=0,
+            )
+            return
+
+        prompt = (prompt or "").strip()
+        if not prompt:
+            yield ProgressEvent(
+                stage="build",
+                status="error",
+                message="Describe what you’d like to cook.",
+                progress=0,
+            )
+            return
+        if len(prompt) > 4000:
+            yield ProgressEvent(
+                stage="build",
+                status="error",
+                message="That description is too long. Keep it under 4000 characters.",
+                progress=0,
+            )
+            return
+
+        # Ensure synthetic ideas exist for each planned day (used for review/regen).
+        if not session.ideas or len(session.ideas) != n:
+            session.ideas = [
+                WizardIdea(
+                    id=str(uuid.uuid4()),
+                    title=f"Dinner for {day}",
+                    justification="From your description.",
+                )
+                for day in session.days
+            ]
+            session.selected_idea_ids = [i.id for i in session.ideas]
+            session.built_recipes = []
+            session.build_messages = []
+
+        selected = [i for i in session.ideas if i.id in set(session.selected_idea_ids)]
+        order = {iid: idx for idx, iid in enumerate(session.selected_idea_ids)}
+        selected.sort(key=lambda i: order[i.id])
+
+        partial = bool(
+            refinement and session.build_messages and session.built_recipes and idea_ids
+        )
+        if refinement and session.build_messages and session.built_recipes:
+            if idea_ids:
+                wanted = set(idea_ids)
+                targets = [i for i in selected if i.id in wanted]
+                if not targets:
+                    yield ProgressEvent(
+                        stage="build",
+                        status="error",
+                        message="Pick at least one dinner to regenerate.",
+                        progress=0,
+                    )
+                    return
+            else:
+                targets = list(selected)
+
+            prior_plan = [
+                {
+                    "idea_id": r.idea_id,
+                    "title": r.title,
+                    "description": r.description,
+                    "instructions": r.instructions,
+                    "notes": r.notes,
+                    "prep_time": r.prep_time,
+                    "ingredients": r.ingredients,
+                }
+                for r in session.built_recipes
+            ]
+            session.build_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "BUILD_RECIPES_FREEFORM refine previous drafts. "
+                        "Return ONLY the dinners listed below "
+                        f"({len(targets)} recipe(s)); leave the rest unchanged.\n"
+                        + "\n".join(f"- {i.title}" for i in targets)
+                        + f"\n\nFeedback:\n{refinement}\n\n"
+                        "Original request:\n"
+                        f"{prompt}\n\n"
+                        "Prior plan context (do not drop coherence with these):\n"
+                        + json.dumps(prior_plan)
+                        + "\n\nRespond with ONLY valid JSON: "
+                        '{"recipes":[...]} for the dinners listed above.'
+                    ),
+                }
+            )
+            work_list = targets
+        else:
+            self._clear_from(session, "ideate")
+            library_preview = search_user_recipes(db, user, "", limit=20)
+            system = (
+                "You build complete dinner recipes from a user's free-text request. "
+                "Respect dietary restrictions implied in the request. "
+                "Respond with ONLY valid JSON (no markdown) matching:\n"
+                '{"recipes":[{'
+                '"title":"string","description":"string",'
+                '"instructions":"string","notes":"string|null",'
+                '"prep_time":30,'
+                '"ingredients":[{"name":"string","amount":1.0,'
+                '"units":"string|null","details":"string|null"}],'
+                '"source":"generated","existing_recipe_id":null'
+                "}]}\n"
+                'Use source "library" and set existing_recipe_id when reusing '
+                'a library recipe; otherwise source "generated" and null id.\n'
+                "For instructions: use numbered steps (1. 2. 3. …) with a real "
+                "newline (\\n) between each step — never a single mashed paragraph."
+            )
+            title_lines = "\n".join(f"- {i.title}" for i in selected)
+            user_prompt = (
+                "BUILD_RECIPES_FREEFORM\n"
+                f"Plan {n} dinner(s) for these days: {', '.join(session.days)}\n"
+                f"User request:\n{prompt}\n\n"
+                "Return exactly "
+                f"{n} recipe object(s), one per day, in the same order.\n"
+                "Return recipes for:\n"
+                f"{title_lines}\n\n"
+                "User library (may reuse by id when appropriate):\n"
+                + json.dumps(library_preview)
+                + "\n\nWrite instructions as numbered steps separated by newlines, e.g.\n"
+                '"1. Heat the oil.\\n2. Add the onion.\\n3. Simmer 20 minutes."'
+            )
+            session.ideas = selected
+            session.selected_idea_ids = [i.id for i in selected]
+            session.build_messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+            work_list = selected
+            partial = False
+
+        total = len(work_list)
+        yield self._log(
+            session,
+            "build",
+            "running",
+            "Reading your description…",
+            0.1,
+        )
+        await asyncio.sleep(0.35)
+
+        yield self._log(
+            session,
+            "build",
+            "running",
+            f"Drafting {total} dinner{'s' if total != 1 else ''}…",
+            0.45,
+        )
+        await asyncio.sleep(0.4)
+
+        messages = [ChatMessage(**m) for m in session.build_messages]
+        result = await self.llm.complete(messages, temperature=0.35)
+        session.stubbed = result.stubbed
+        parsed = result.parsed or {}
+        raw_recipes = parsed.get("recipes") or []
+
+        def _build_one(idea: WizardIdea, raw: dict) -> WizardBuiltRecipe:
+            existing_id = raw.get("existing_recipe_id")
+            return WizardBuiltRecipe(
+                idea_id=idea.id,
+                title=str(raw.get("title") or idea.title).strip(),
+                description=str(raw.get("description") or "").strip(),
+                instructions=normalize_instruction_newlines(
+                    str(raw.get("instructions") or "")
+                ),
+                notes=(
+                    str(raw.get("notes")).strip()
+                    if raw.get("notes") is not None
+                    else None
+                ),
+                prep_time=(
+                    float(raw["prep_time"])
+                    if raw.get("prep_time") is not None
+                    else None
+                ),
+                ingredients=list(raw.get("ingredients") or []),
+                source=str(raw.get("source") or "generated"),
+                existing_recipe_id=(
+                    int(existing_id) if existing_id is not None else None
+                ),
+            )
+
+        def _raw_for(idea: WizardIdea, index: int) -> dict:
+            raw = raw_recipes[index] if index < len(raw_recipes) else {}
+            for candidate in raw_recipes:
+                if str(candidate.get("title", "")).lower() == idea.title.lower():
+                    return candidate
+            return raw
+
+        if partial:
+            by_idea = {r.idea_id: r for r in session.built_recipes}
+            for idx, idea in enumerate(work_list):
+                by_idea[idea.id] = _build_one(idea, _raw_for(idea, idx))
+            built = [by_idea[i.id] for i in selected if i.id in by_idea]
+            while len(built) < len(selected):
+                missing = selected[len(built)]
+                built.append(_build_one(missing, {}))
+        else:
+            built = [
+                _build_one(idea, _raw_for(idea, idx))
+                for idx, idea in enumerate(work_list)
+            ]
+            # Pad if stub under-delivers
+            while len(built) < len(selected):
+                missing = selected[len(built)]
+                built.append(_build_one(missing, {}))
+
+        session.built_recipes = built
+        session.build_messages.append(
+            {
+                "role": "assistant",
+                "content": json.dumps(
+                    [
+                        {
+                            "idea_id": r.idea_id,
+                            "title": r.title,
+                            "description": r.description,
+                            "instructions": r.instructions,
+                            "notes": r.notes,
+                            "prep_time": r.prep_time,
+                            "ingredients": r.ingredients,
+                        }
+                        for r in built
+                    ]
+                ),
+            }
+        )
+        session.step = "review"
+
+        yield self._log(
+            session,
+            "build",
+            "complete",
+            (
+                f"Updated {len(work_list)} dinner{'s' if len(work_list) != 1 else ''}."
+                if refinement
+                else f"Built {len(built)} dinner{'s' if len(built) != 1 else ''} — review your "
+                f"{'week' if n > 1 else 'recipe'}."
+            ),
+            1.0,
+            {
+                "recipes": [self._serialize_built(r) for r in built],
+                "regenerated_idea_ids": [i.id for i in work_list],
+                "stubbed": session.stubbed,
+            },
+        )
+
     async def run_build(
         self,
         session: WizardSession,

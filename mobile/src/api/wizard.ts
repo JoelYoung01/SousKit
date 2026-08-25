@@ -79,3 +79,18 @@ export function streamBuild(
 ): Promise<void> {
   return postSse(`/meal-plan-wizard/sessions/${sessionId}/build/`, body, onEvent, signal);
 }
+
+/** Streamed freeform build — skips ideate/select; builds from a single prompt. */
+export function streamFreeformBuild(
+  sessionId: string,
+  body: { prompt: string; refinement: string | null; idea_ids: string[] | null },
+  onEvent: SseHandler<MealPlanWizardProgressEvent>,
+  signal?: AbortSignal
+): Promise<void> {
+  return postSse(
+    `/meal-plan-wizard/sessions/${sessionId}/build-freeform/`,
+    body,
+    onEvent,
+    signal
+  );
+}

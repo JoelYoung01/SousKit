@@ -39,11 +39,15 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const ASSIGN_DAY_COUNT = 14;
 
 type UiStep = "days" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type InputMode = "structured" | "simple";
 
 /** Ad-hoc create from Home / + menu — one recipe; day assign is optional at the end. */
 const recipeMode = computed(() => route.query.mode === "recipe");
 
 const uiStep = ref<UiStep>("days");
+/** Structured week form vs single free-text prompt (like AI edit). */
+const inputMode = ref<InputMode>(recipeMode.value ? "simple" : "structured");
+const simplePrompt = ref("");
 const session = ref<MealPlanWizardSession | null>(null);
 const localPrefs = ref(emptyWizardPrefs());
 const selectedDays = ref<string[]>([]);
@@ -138,11 +142,18 @@ function isIdeaDisabled(id: string) {
   return selectionFull.value && !isIdeaSelected(id);
 }
 
-const STEP_ORDER = computed<UiStep[]>(() =>
-  recipeMode.value
+const STEP_ORDER = computed<UiStep[]>(() => {
+  if (inputMode.value === "simple") {
+    return recipeMode.value
+      ? ["prefs", "build", "review", "assign"]
+      : ["days", "prefs", "build", "review"];
+  }
+  return recipeMode.value
     ? ["prefs", "ideate", "select", "build", "review", "assign"]
-    : ["days", "prefs", "ideate", "select", "build", "review"]
-);
+    : ["days", "prefs", "ideate", "select", "build", "review"];
+});
+
+const canContinueSimple = computed(() => Boolean(simplePrompt.value.trim()) && !busy.value);
 
 const stepIndex = computed(() => STEP_ORDER.value.indexOf(uiStep.value));
 
@@ -171,8 +182,8 @@ function previousStep(step: UiStep): UiStep {
   if (step === "prefs") return recipeMode.value ? "prefs" : "days";
   if (step === "ideate") return "prefs";
   if (step === "select") return "prefs";
-  if (step === "build") return "select";
-  if (step === "review") return "select";
+  if (step === "build") return inputMode.value === "simple" ? "prefs" : "select";
+  if (step === "review") return inputMode.value === "simple" ? "prefs" : "select";
   if (step === "assign") return "review";
   return recipeMode.value ? "prefs" : "days";
 }
@@ -202,7 +213,7 @@ const headerTitle = computed(() => {
   if (recipeMode.value) {
     switch (uiStep.value) {
       case "prefs":
-        return "What are you craving?";
+        return inputMode.value === "simple" ? "Describe your recipe" : "What are you craving?";
       case "ideate":
         return "Cooking up ideas";
       case "select":
@@ -221,7 +232,7 @@ const headerTitle = computed(() => {
     case "days":
       return "Which nights?";
     case "prefs":
-      return "Set the vibe";
+      return inputMode.value === "simple" ? "Describe your dinners" : "Set the vibe";
     case "ideate":
       return "Cooking up ideas";
     case "select":
@@ -355,6 +366,51 @@ async function refreshSession() {
   );
 }
 
+async function runFreeformBuild(refinement?: string, ideaIds?: string[]) {
+  const prompt = simplePrompt.value.trim();
+  if (!prompt && !refinement) {
+    error.value = "Describe what you’d like to cook.";
+    return;
+  }
+  error.value = "";
+  busy.value = true;
+  running.value = true;
+  liveEvents.value = [];
+  uiStep.value = "build";
+  try {
+    await syncDaysAndPrefs();
+    const s = session.value!;
+    abortController?.abort();
+    abortController = new AbortController();
+    await postSse<MealPlanWizardProgressEvent>(
+      `/meal-plan-wizard/sessions/${s.id}/build-freeform/`,
+      {
+        prompt,
+        refinement: refinement || null,
+        idea_ids: ideaIds?.length ? ideaIds : null
+      },
+      (event) => {
+        if (event.status === "done") return;
+        liveEvents.value = [...liveEvents.value, event];
+        if (event.status === "error") error.value = event.message;
+      },
+      abortController.signal
+    );
+    await refreshSession();
+    refineText.value = "";
+    regenIdeaIds.value = [];
+    if (!error.value) uiStep.value = "review";
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") {
+      error.value = getErrorMessage(e, "Build failed");
+      toast.fromError(e, "Build failed");
+    }
+  } finally {
+    running.value = false;
+    busy.value = false;
+  }
+}
+
 async function runIdeate(refinement?: string) {
   error.value = "";
   busy.value = true;
@@ -478,7 +534,11 @@ async function applyRefinement() {
       error.value = "Mark at least one dinner to regenerate.";
       return;
     }
-    await runBuild(text, [...regenIdeaIds.value]);
+    if (inputMode.value === "simple") {
+      await runFreeformBuild(text, [...regenIdeaIds.value]);
+    } else {
+      await runBuild(text, [...regenIdeaIds.value]);
+    }
   }
 }
 
@@ -861,10 +921,55 @@ onUnmounted(() => {
 
     <!-- PREFS -->
     <section v-else-if="uiStep === 'prefs'" class="mt-5">
-      <p class="mb-4 text-sm text-muted-foreground">
-        Everything here is optional. We’ll remember goals and diet for next time.
-      </p>
-      <WizardPrefsFields v-model="localPrefs" />
+      <div class="mb-4 flex rounded-xl border border-border bg-secondary/40 p-1">
+        <button
+          type="button"
+          class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors"
+          :class="
+            inputMode === 'simple'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground'
+          "
+          @click="inputMode = 'simple'"
+        >
+          Describe it
+        </button>
+        <button
+          type="button"
+          class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors"
+          :class="
+            inputMode === 'structured'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground'
+          "
+          @click="inputMode = 'structured'"
+        >
+          Week form
+        </button>
+      </div>
+
+      <template v-if="inputMode === 'simple'">
+        <p class="mb-3 text-sm text-muted-foreground">
+          {{
+            recipeMode
+              ? "Describe the recipe you want — ingredients, style, dietary needs, etc."
+              : `Describe dinners for your ${selectedDays.length} selected night${selectedDays.length === 1 ? "" : "s"}.`
+          }}
+        </p>
+        <Textarea
+          v-model="simplePrompt"
+          :disabled="busy"
+          placeholder="e.g. Spicy Thai basil chicken with jasmine rice, under 30 minutes and dairy-free"
+          class="min-h-32 rounded-xl bg-card"
+        />
+      </template>
+      <template v-else>
+        <p class="mb-4 text-sm text-muted-foreground">
+          Everything here is optional. We’ll remember goals and diet for next time.
+        </p>
+        <WizardPrefsFields v-model="localPrefs" />
+      </template>
+
       <div class="mt-5 grid grid-cols-2 gap-2">
         <Button
           variant="outline"
@@ -873,7 +978,16 @@ onUnmounted(() => {
         >
           Back
         </Button>
-        <Button class="gap-1.5" :disabled="busy" @click="runIdeate()">
+        <Button
+          v-if="inputMode === 'simple'"
+          class="gap-1.5"
+          :disabled="!canContinueSimple"
+          @click="runFreeformBuild()"
+        >
+          <Sparkles class="size-3.5" />
+          {{ recipeMode ? "Generate recipe" : `Build ${selectedDays.length} dinner${selectedDays.length === 1 ? "" : "s"}` }}
+        </Button>
+        <Button v-else class="gap-1.5" :disabled="busy" @click="runIdeate()">
           <Sparkles class="size-3.5" />
           Generate ideas
         </Button>
@@ -889,12 +1003,18 @@ onUnmounted(() => {
         :subtitle="
           uiStep === 'ideate'
             ? `Aiming for ${session?.idea_target_count ?? selectedDays.length + 5} options`
-            : `Building ${selectCount} recipes from your picks`
+            : inputMode === 'simple'
+              ? recipeMode
+                ? 'Writing your recipe from your description'
+                : `Writing ${selectCount} recipes from your description`
+              : `Building ${selectCount} recipes from your picks`
         "
       />
       <div v-if="!running && error" class="grid grid-cols-2 gap-2">
-        <Button variant="outline" @click="rewindTo('prefs')">Edit prefs</Button>
-        <Button @click="uiStep === 'ideate' ? runIdeate() : runBuild()">Retry</Button>
+        <Button variant="outline" @click="rewindTo('prefs')">Edit input</Button>
+        <Button @click="uiStep === 'ideate' ? runIdeate() : inputMode === 'simple' ? runFreeformBuild() : runBuild()">
+          Retry
+        </Button>
       </div>
       <div v-else class="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />

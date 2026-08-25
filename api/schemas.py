@@ -490,6 +490,15 @@ class MealPlanWizardRefineRequest(BaseModel):
     idea_ids: list[str] | None = None
 
 
+class MealPlanWizardFreeformBuildRequest(BaseModel):
+    """Build recipes directly from a single free-text prompt (skips ideate/select)."""
+
+    prompt: str = Field(min_length=1, max_length=4000)
+    refinement: str | None = None
+    """Optional idea ids to regenerate on a refine turn. Omit to rebuild all."""
+    idea_ids: list[str] | None = None
+
+
 class MealPlanWizardRewindRequest(BaseModel):
     to_step: str
 
