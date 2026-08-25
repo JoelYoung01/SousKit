@@ -2,9 +2,15 @@ import { EmptyState } from "@/components/EmptyState";
 import { SwipeRow } from "@/components/SwipeRow";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
-import { useGroceryList, useSetGroceryStatus } from "@/hooks/use-grocery";
+import {
+  useCreateManualGroceryItem,
+  useDeleteManualGroceryItem,
+  useGroceryList,
+  useSetGroceryStatus
+} from "@/hooks/use-grocery";
 import { colors } from "@/lib/colors";
 import { formatShortRange } from "@/lib/dates";
 import { getErrorMessage } from "@/api/errors";
@@ -12,7 +18,7 @@ import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
 import type { GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
-import { EyeOff, ShoppingCart } from "lucide-react-native";
+import { EyeOff, Plus, ShoppingCart } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,11 +30,14 @@ export default function GroceryListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [showDismissed, setShowDismissed] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
   const [pendingHideKeys, setPendingHideKeys] = useState<Set<string>>(() => new Set());
   const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const list = useGroceryList();
   const setStatus = useSetGroceryStatus();
+  const createManual = useCreateManualGroceryItem();
+  const deleteManual = useDeleteManualGroceryItem();
 
   const items = useMemo(() => list.data?.items ?? [], [list.data]);
 
@@ -108,10 +117,30 @@ export default function GroceryListScreen() {
       return;
     }
     if (item.dismissed) {
-      setStatus.mutate({ item, status: null });
+      setStatus.mutate({ item, status: item.auto_dismissed ? "restored" : null });
       return;
     }
     queueHide(item);
+  }
+
+  function onAddItem() {
+    const name = newItemName.trim();
+    if (!name || createManual.isPending) return;
+    createManual.mutate(
+      { name },
+      {
+        onSuccess: () => setNewItemName("")
+      }
+    );
+  }
+
+  function onDelete(item: GroceryItem) {
+    clearPending(item.key);
+    if (item.is_manual && item.recipes.length === 0 && item.manual_item_ids.length > 0) {
+      deleteManual.mutate(item.manual_item_ids[0]);
+      return;
+    }
+    setStatus.mutate({ item, status: "deleted" });
   }
 
   function onViewRecipe(item: GroceryItem) {
@@ -160,6 +189,27 @@ export default function GroceryListScreen() {
           >
             {showDismissed ? "Hide dismissed" : "Show dismissed"}
           </Text>
+        </Button>
+      </View>
+
+      <View className="mt-4 flex-row gap-2">
+        <Input
+          className="flex-1 bg-card"
+          value={newItemName}
+          onChangeText={setNewItemName}
+          placeholder="Add an item…"
+          autoCapitalize="sentences"
+          returnKeyType="done"
+          onSubmitEditing={onAddItem}
+          editable={!createManual.isPending}
+        />
+        <Button
+          size="icon"
+          className="shrink-0"
+          disabled={!newItemName.trim() || createManual.isPending}
+          onPress={onAddItem}
+        >
+          <Plus size={16} color={colors.foreground} />
         </Button>
       </View>
 
@@ -241,11 +291,8 @@ export default function GroceryListScreen() {
                     <SwipeRow
                       key={item.key}
                       onDismiss={() => queueHide(item)}
-                      onDelete={() => {
-                        clearPending(item.key);
-                        setStatus.mutate({ item, status: "deleted" });
-                      }}
-                      onView={() => onViewRecipe(item)}
+                      onDelete={() => onDelete(item)}
+                      onView={item.recipes.length > 0 ? () => onViewRecipe(item) : undefined}
                     >
                       <Pressable
                         accessibilityRole="button"

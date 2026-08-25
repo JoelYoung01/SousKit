@@ -1,5 +1,10 @@
-import type { GroceryItem, GroceryListResponse, GrocerySummaryResponse } from "@/types";
-import { get, getErrorMessage, put, toast } from "@/utils";
+import type {
+  GroceryItem,
+  GroceryListResponse,
+  GroceryManualItemCreate,
+  GrocerySummaryResponse
+} from "@/types";
+import { del, get, getErrorMessage, post, put, toast } from "@/utils";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
@@ -36,10 +41,9 @@ export const useGroceryStore = defineStore("grocery", () => {
   }
 
   async function ensureLoaded(opts?: { force?: boolean }) {
-    if (loaded.value && !opts?.force) return;
     if (listInflight) return listInflight;
 
-    const soft = loaded.value && items.value.length > 0;
+    const soft = loaded.value && items.value.length > 0 && !opts?.force;
     if (soft) refreshing.value = true;
     else loading.value = true;
     error.value = null;
@@ -72,7 +76,10 @@ export const useGroceryStore = defineStore("grocery", () => {
     activeCount.value = items.value.filter((i) => !i.dismissed && !i.deleted).length;
   }
 
-  async function setStatus(item: GroceryItem, status: "dismissed" | "deleted" | null) {
+  async function setStatus(
+    item: GroceryItem,
+    status: "dismissed" | "deleted" | "restored" | null
+  ) {
     const previous = { dismissed: item.dismissed, deleted: item.deleted };
     patchLocal(item.key, {
       dismissed: status === "dismissed",
@@ -86,6 +93,17 @@ export const useGroceryStore = defineStore("grocery", () => {
       toast.fromError(er, "Couldn’t update that grocery item.");
       throw er;
     }
+  }
+
+  async function addManualItem(body: GroceryManualItemCreate) {
+    const created = await post<GroceryItem>("/grocery/items/", body);
+    await ensureLoaded({ force: true });
+    return created;
+  }
+
+  async function deleteManualItem(itemId: number) {
+    await del(`/grocery/items/${itemId}/`);
+    await ensureLoaded({ force: true });
   }
 
   function invalidate() {
@@ -118,6 +136,8 @@ export const useGroceryStore = defineStore("grocery", () => {
     fetchSummary,
     ensureLoaded,
     setStatus,
+    addManualItem,
+    deleteManualItem,
     patchLocal,
     invalidate,
     reset

@@ -153,6 +153,7 @@ class PlannedRecipe(BaseIndexedDbModel, table=True):
 class GroceryItemStatus(str, Enum):
     dismissed = "dismissed"
     deleted = "deleted"
+    restored = "restored"  # keeps a past-due item active after auto-dismiss
 
 
 class HouseholdRole(str, Enum):
@@ -215,6 +216,21 @@ class GroceryItemState(BaseIndexedDbModel, table=True):
     item_key: str = Field(index=True)
     status: str  # GroceryItemStatus value
     updated_on: datetime = Field(sa_type=UTCDateTime)
+
+    created_by: "User" = Relationship()
+    household: Household = Relationship()
+
+
+class GroceryManualItem(BaseIndexedDbModel, table=True):
+    """Household-scoped ad-hoc grocery line not tied to a recipe."""
+
+    created_by_id: int = Field(foreign_key="user.id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    name: str
+    item_key: str = Field(index=True)
+    amount: float | None = None
+    units: str | None = None
+    created_on: datetime = Field(sa_type=UTCDateTime)
 
     created_by: "User" = Relationship()
     household: Household = Relationship()

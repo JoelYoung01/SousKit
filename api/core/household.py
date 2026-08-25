@@ -11,6 +11,7 @@ from sqlmodel import Session, col, func, or_, select
 from api.core.config import settings
 from api.models import (
     GroceryItemState,
+    GroceryManualItem,
     Household,
     HouseholdInvite,
     HouseholdInviteStatus,
@@ -196,6 +197,14 @@ def migrate_household_data(
             state.household_id = to_household_id
             session.add(state)
 
+    for manual in session.exec(
+        select(GroceryManualItem).where(
+            GroceryManualItem.household_id == from_household_id
+        )
+    ).all():
+        manual.household_id = to_household_id
+        session.add(manual)
+
     session.commit()
 
 
@@ -207,6 +216,10 @@ def dissolve_household_if_empty(session: Session, household_id: int) -> None:
         select(GroceryItemState).where(GroceryItemState.household_id == household_id)
     ).all():
         session.delete(state)
+    for manual in session.exec(
+        select(GroceryManualItem).where(GroceryManualItem.household_id == household_id)
+    ).all():
+        session.delete(manual)
     for plan in session.exec(
         select(PlannedRecipe).where(PlannedRecipe.household_id == household_id)
     ).all():

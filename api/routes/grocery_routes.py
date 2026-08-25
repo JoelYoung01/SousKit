@@ -6,13 +6,27 @@ from sqlmodel import select
 
 from api.core.authentication import CurrentUserDep, verify_access_token
 from api.core.database import SessionDep
-from api.core.grocery import aggregate_grocery_items, normalize_item_key, window_bounds
-from api.core.household import ensure_user_household, require_membership
-from api.models import GroceryItemState, GroceryItemStatus, PlannedRecipe, Recipe
+from api.core.grocery import (
+    aggregate_grocery_items,
+    infer_category,
+    normalize_item_key,
+    should_auto_dismiss,
+    window_bounds,
+)
+from api.core.household import require_membership
+from api.models import (
+    GroceryItemState,
+    GroceryItemStatus,
+    GroceryManualItem,
+    PlannedRecipe,
+    Recipe,
+)
 from api.schemas import (
     GroceryItem,
     GroceryItemStateUpdate,
     GroceryListResponse,
+    GroceryManualItemCreate,
+    GroceryQuantity,
     GrocerySummaryResponse,
 )
 
@@ -23,14 +37,37 @@ router = APIRouter(
 )
 
 
+def _item_dismissed(
+    *,
+    state: GroceryItemState | None,
+    latest_planned_for: datetime | None,
+    is_manual: bool,
+    today,
+) -> tuple[bool, bool]:
+    """Return (dismissed, auto_dismissed)."""
+    if state and state.status == GroceryItemStatus.deleted.value:
+        return False, False
+    if state and state.status == GroceryItemStatus.restored.value:
+        return False, False
+    if state and state.status == GroceryItemStatus.dismissed.value:
+        return True, False
+    auto = (
+        not is_manual
+        and should_auto_dismiss(latest_planned_for, today)
+    )
+    return auto, auto
+
+
 def _build_grocery_items(
     current_user: CurrentUserDep,
     session: SessionDep,
     *,
     include_deleted: bool = False,
 ) -> tuple[datetime, datetime, list[GroceryItem]]:
-    start, end = window_bounds(datetime.now(UTC))
+    now = datetime.now(UTC)
+    start, end = window_bounds(now)
     household, _ = require_membership(session, current_user)
+    today = now.date()
 
     planned = session.exec(
         select(PlannedRecipe)
@@ -42,7 +79,13 @@ def _build_grocery_items(
         .options(selectinload(PlannedRecipe.recipe).selectinload(Recipe.ingredients))
     ).all()
 
-    aggregated = aggregate_grocery_items(list(planned))
+    manual_items = session.exec(
+        select(GroceryManualItem).where(
+            GroceryManualItem.household_id == household.id
+        )
+    ).all()
+
+    aggregated = aggregate_grocery_items(list(planned), list(manual_items))
 
     states = session.exec(
         select(GroceryItemState).where(
@@ -54,14 +97,20 @@ def _build_grocery_items(
     items: list[GroceryItem] = []
     for raw in aggregated:
         state = state_by_key.get(raw["key"])
-        dismissed = bool(state and state.status == GroceryItemStatus.dismissed.value)
+        dismissed, auto_dismissed = _item_dismissed(
+            state=state,
+            latest_planned_for=raw.get("latest_planned_for"),
+            is_manual=raw.get("is_manual", False),
+            today=today,
+        )
         deleted = bool(state and state.status == GroceryItemStatus.deleted.value)
         if deleted and not include_deleted:
             continue
         items.append(
             GroceryItem(
-                **raw,
+                **{k: v for k, v in raw.items() if k != "latest_planned_for"},
                 dismissed=dismissed,
+                auto_dismissed=auto_dismissed,
                 deleted=deleted,
             )
         )
@@ -100,6 +149,81 @@ def get_grocery_summary(
     )
 
 
+@router.post("/items/", response_model=GroceryItem)
+def create_manual_grocery_item(
+    body: GroceryManualItemCreate,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Enter an item name.")
+
+    household, _ = require_membership(session, current_user)
+    key = normalize_item_key(name)
+    if not key:
+        raise HTTPException(status_code=400, detail="Enter an item name.")
+
+    manual = GroceryManualItem(
+        created_by_id=current_user.id,
+        household_id=household.id,
+        name=name,
+        item_key=key,
+        amount=body.amount,
+        units=(body.units or "").strip() or None,
+        created_on=datetime.now(UTC),
+    )
+    session.add(manual)
+    session.commit()
+    session.refresh(manual)
+
+    grocery = get_grocery_list(
+        current_user=current_user, session=session, include_deleted=True
+    )
+    for item in grocery.items:
+        if item.key == key:
+            return item
+
+    return GroceryItem(
+        key=key,
+        name=name,
+        category=infer_category(name),
+        quantities=[GroceryQuantity(amount=body.amount, units=manual.units)],
+        quantity_display="",
+        recipes=[],
+        recipe_titles="Added manually",
+        source_ingredient_ids=[],
+        manual_item_ids=[manual.id],
+        is_manual=True,
+        dismissed=False,
+        auto_dismissed=False,
+        deleted=False,
+    )
+
+
+@router.delete("/items/{item_id}/", status_code=204)
+def delete_manual_grocery_item(
+    item_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    household, _ = require_membership(session, current_user)
+    manual = session.get(GroceryManualItem, item_id)
+    if not manual or manual.household_id != household.id:
+        raise HTTPException(status_code=404, detail="That grocery item couldn’t be found.")
+
+    state = session.exec(
+        select(GroceryItemState).where(
+            GroceryItemState.household_id == household.id,
+            GroceryItemState.item_key == manual.item_key,
+        )
+    ).first()
+    if state:
+        session.delete(state)
+    session.delete(manual)
+    session.commit()
+
+
 @router.put("/state/", response_model=GroceryItem)
 def update_grocery_item_state(
     body: GroceryItemStateUpdate,
@@ -115,13 +239,14 @@ def update_grocery_item_state(
     if body.status is not None and body.status not in {
         GroceryItemStatus.dismissed.value,
         GroceryItemStatus.deleted.value,
+        GroceryItemStatus.restored.value,
     }:
         raise HTTPException(
             status_code=400,
             detail="That grocery status isn’t valid. Refresh and try again.",
         )
 
-    household = ensure_user_household(session, current_user)
+    household, _ = require_membership(session, current_user)
 
     existing = session.exec(
         select(GroceryItemState).where(
@@ -138,6 +263,7 @@ def update_grocery_item_state(
         status_value = GroceryItemStatus(body.status).value
         if existing:
             existing.status = status_value
+            existing.created_by_id = current_user.id
             existing.updated_on = datetime.now(UTC)
             session.add(existing)
         else:
@@ -152,7 +278,6 @@ def update_grocery_item_state(
             )
         session.commit()
 
-    # Return the item as it appears in the current window (if present)
     grocery = get_grocery_list(
         current_user=current_user, session=session, include_deleted=True
     )
@@ -160,7 +285,6 @@ def update_grocery_item_state(
         if item.key == key:
             return item
 
-    # Item may not be in the window (e.g. no longer planned); return a stub
     return GroceryItem(
         key=key,
         name=body.item_key.strip() or key,
@@ -170,6 +294,9 @@ def update_grocery_item_state(
         recipes=[],
         recipe_titles="",
         source_ingredient_ids=[],
+        manual_item_ids=[],
+        is_manual=False,
         dismissed=body.status == GroceryItemStatus.dismissed.value,
+        auto_dismissed=False,
         deleted=body.status == GroceryItemStatus.deleted.value,
     )
