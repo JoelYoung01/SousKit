@@ -7,6 +7,7 @@ import type {
   RecipeCoverGenerateResponse,
   RecipeDetail
 } from "@/types";
+import { normalizeCoverOption } from "@/lib/coverMedia";
 import { del, get, post, put } from "./client";
 
 export const RECIPE_PAGE_SIZE = 50;
@@ -56,14 +57,18 @@ export function deleteRecipe(recipeId: number | string): Promise<void> {
 }
 
 /** Find free public-domain cover photos for a recipe (server-side search). */
-export function generateRecipeCover(body: {
+export async function generateRecipeCover(body: {
   name: string;
   description?: string | null;
   ingredients?: { name: string }[];
   limit?: number;
   exclude_keys?: string[];
 }): Promise<RecipeCoverGenerateResponse> {
-  return post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", body);
+  const result = await post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", body);
+  return {
+    ...result,
+    options: result.options.map(normalizeCoverOption)
+  };
 }
 
 export function createIngredient(body: IngredientCreate): Promise<IngredientSlim> {

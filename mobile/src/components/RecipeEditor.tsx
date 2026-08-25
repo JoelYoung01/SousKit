@@ -20,6 +20,7 @@ import { Text } from "@/components/ui/text";
 import { Textarea } from "@/components/ui/textarea";
 import { colors } from "@/lib/colors";
 import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
+import { normalizeCoverOption, normalizeUpload } from "@/lib/coverMedia";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
 import type { RecipeCoverOption, RecipeDetail, UploadSlim } from "@/types";
@@ -155,8 +156,9 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
         fileName: asset.fileName,
         mimeType: asset.mimeType
       });
-      setCoverImageId(upload.id);
-      setCoverPreviewUrl(upload.url);
+      const normalized = normalizeUpload(upload);
+      setCoverImageId(normalized.id);
+      setCoverPreviewUrl(normalized.url);
     } catch (er) {
       setCoverError(getErrorMessage(er, "Could not upload the image."));
       toast.fromError(er, "Could not upload the image.");
@@ -166,8 +168,13 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   };
 
   const applyCover = (upload: RecipeCoverOption | UploadSlim) => {
-    setCoverImageId(upload.id);
-    setCoverPreviewUrl(upload.url);
+    const normalized = "skip_key" in upload ? normalizeCoverOption(upload) : normalizeUpload(upload);
+    if (!normalized.url) {
+      setCoverError("Could not load the selected cover image.");
+      return;
+    }
+    setCoverImageId(normalized.id);
+    setCoverPreviewUrl(normalized.url);
     setCoverOptions([]);
     setCoverPickerOpen(false);
   };
