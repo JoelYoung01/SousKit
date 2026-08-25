@@ -15,7 +15,10 @@ from api.core.household import (
     user_can_access_recipe,
     user_can_edit_recipe,
 )
-from api.core.image_gen.service import generate_recipe_cover_upload
+from api.core.image_gen.service import (
+    generate_recipe_cover_upload,
+    generate_recipe_cover_uploads,
+)
 from api.core.recipe_ai_edit import (
     RecipeAiEditError,
     apply_recipe_patch,
@@ -34,11 +37,11 @@ from api.schemas import (
     RecipeAiEditRequest,
     RecipeCard,
     RecipeCoverGenerateRequest,
+    RecipeCoverGenerateResponse,
     RecipeCreate,
     RecipeDetail,
     RecipeImportFromUrlRequest,
     RecipeUpdate,
-    UploadFileResponse,
 )
 
 router = APIRouter(
@@ -134,33 +137,48 @@ async def import_recipe_from_url_route(
     return recipe
 
 
-@router.post("/generate-cover/", response_model=UploadFileResponse)
+@router.post("/generate-cover/", response_model=RecipeCoverGenerateResponse)
 def generate_recipe_cover(
     body: RecipeCoverGenerateRequest,
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
-    """Fetch/generate a cover image from the active image provider (default: broke).
+    """Fetch/generate cover image options from the active image provider.
 
-    Creates an Upload owned by the current user. The client should set
-    ``cover_image_id`` on create/update — same pattern as manual upload.
+    Search providers (broke / Openverse) return up to ``limit`` candidates so
+    the client can show a picker. True generators return a single option.
+    Creates Upload rows owned by the current user; the client sets
+    ``cover_image_id`` on create/update after the user picks one.
     """
     ingredients = [
         {"name": ing.name} for ing in body.ingredients if (ing.name or "").strip()
     ]
-    upload = generate_recipe_cover_upload(
+    uploads, provider, mode = generate_recipe_cover_uploads(
         user=current_user,
         db=session,
         title=body.name,
         description=body.description,
         ingredients=ingredients,
+        limit=body.limit,
     )
-    if upload is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Couldn’t find a suitable cover image. Try again or upload your own.",
-        )
-    return upload
+    if not uploads:
+        if provider == "stub":
+            detail = (
+                "Cover image search isn’t enabled on this server. "
+                "Upload your own photo, or ask an admin to set "
+                "IMAGE_GEN_PROVIDER=broke."
+            )
+        else:
+            detail = (
+                "Couldn’t find suitable cover images for that recipe. "
+                "Try a clearer dish name, or upload your own photo."
+            )
+        raise HTTPException(status_code=404, detail=detail)
+    return {
+        "provider": provider,
+        "mode": mode,
+        "options": uploads,
+    }
 
 
 @unauth_router.get("/public/", response_model=list[RecipeDetail])

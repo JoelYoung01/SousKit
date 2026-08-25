@@ -80,13 +80,14 @@ The admin seed also receives `SUPERUSER_GID` when set.
 ## Recipe cover images (generated recipes)
 
 - On wizard **commit**, newly created recipes get a cover via `api/core/image_gen/` (ABC + factory, same pattern as the LLM client).
-- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients) which returns an `Upload` the form binds as `cover_image_id`.
+- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients, optional `limit` default 4) which returns `{ provider, mode, options: Upload[] }`. Search providers (`broke`) use `mode: "pick"` so the UI shows a chooser; the form binds the chosen option as `cover_image_id`.
 - `IMAGE_GEN_PROVIDER` selects the adapter:
-  - `broke` (default) — free Openverse search limited to `cc0,pdm` (public domain); downloads bytes into `UPLOAD_DIR` and sets `cover_image_id`. No API key.
-  - `stub` — skip network; leave cover unset (UI shows the default placeholder).
+  - `broke` (default) — free Openverse search limited to `cc0,pdm` (public domain); downloads bytes into `UPLOAD_DIR` and returns up to `limit` candidates. Queries are **title-first** so renaming a recipe and regenerating changes results. No API key.
+  - `stub` — skip network; leave cover unset (UI shows the default placeholder); generate-cover returns 404 with a clear message.
   - `qwen` — reserved for DashScope Qwen-Image-3.0; needs `DASHSCOPE_API_KEY` (not implemented yet).
-- Failures are soft: commit still succeeds if search/download fails. The edit-page button surfaces a 404 when nothing suitable is found.
+- Failures are soft on wizard commit: commit still succeeds if search/download fails. The edit-page button surfaces a 404 when nothing suitable is found.
 - Openverse requires outbound HTTPS to `api.openverse.org` (and the image CDN hosts in results, often `live.staticflickr.com`).
+- Manual uploads: `POST /api/upload/` (multipart field `file`). The filename must be non-empty — empty filenames are rejected with a clear 422 (previously a validation serialization bug made this look like a client "network error").
 
 ## iOS app (`mobile/`)
 

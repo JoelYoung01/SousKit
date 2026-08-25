@@ -3,7 +3,24 @@ import { queryClient } from "@/lib/query-client";
 import { useSessionStore } from "@/stores/session";
 import { parseApiErrorBody } from "./errors";
 
-const NETWORK_MESSAGE = "Network error — check your connection and try again.";
+function networkErrorMessage(error: unknown, context?: string): string {
+  const base = context
+    ? `Couldn’t ${context} — the request never reached the server.`
+    : "Couldn’t reach the server.";
+  const reason =
+    error instanceof TypeError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : null;
+  // RN / browsers often use "Network request failed" / "Failed to fetch".
+  if (reason && !/network request failed|failed to fetch/i.test(reason)) {
+    return `${base} (${reason})`;
+  }
+  return `${base} Check your connection and try again.`;
+}
 
 export class ApiError extends Error {
   public status: number;
@@ -46,7 +63,11 @@ function handleUnauthorized() {
   queryClient.clear();
 }
 
-export async function doFetch<T>(url: string, options?: RequestInit): Promise<T> {
+export async function doFetch<T>(
+  url: string,
+  options?: RequestInit,
+  meta?: { action?: string }
+): Promise<T> {
   const token = useSessionStore.getState().token;
   const headers: Record<string, string> = {
     ...((options?.headers as Record<string, string>) ?? {})
@@ -56,8 +77,9 @@ export async function doFetch<T>(url: string, options?: RequestInit): Promise<T>
   let response: Response;
   try {
     response = await fetch(resolveUrl(url), { ...options, headers });
-  } catch {
-    throw new ApiError(NETWORK_MESSAGE, 503, { userMessage: NETWORK_MESSAGE });
+  } catch (er) {
+    const message = networkErrorMessage(er, meta?.action);
+    throw new ApiError(message, 503, { userMessage: message });
   }
 
   if (!response.ok) {
@@ -77,38 +99,50 @@ export async function doFetch<T>(url: string, options?: RequestInit): Promise<T>
 }
 
 export async function get<T>(url: string): Promise<T> {
-  return doFetch<T>(url);
+  return doFetch<T>(url, undefined, { action: "load that data" });
 }
 
 export async function post<T>(url: string, body?: object): Promise<T> {
-  return doFetch<T>(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {})
-  });
+  return doFetch<T>(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {})
+    },
+    { action: "save that" }
+  );
 }
 
 export async function put<T>(url: string, body?: object): Promise<T> {
-  return doFetch<T>(url, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {})
-  });
+  return doFetch<T>(
+    url,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {})
+    },
+    { action: "save that" }
+  );
 }
 
 export async function patch<T>(url: string, body?: object): Promise<T> {
-  return doFetch<T>(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {})
-  });
+  return doFetch<T>(
+    url,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {})
+    },
+    { action: "update that" }
+  );
 }
 
 export async function del(url: string): Promise<void> {
-  await doFetch<void>(url, { method: "DELETE" });
+  await doFetch<void>(url, { method: "DELETE" }, { action: "delete that" });
 }
 
 export async function postFile<T>(url: string, file: FormData): Promise<T> {
   // Let fetch set the multipart boundary — do not set Content-Type manually.
-  return doFetch<T>(url, { method: "POST", body: file });
+  return doFetch<T>(url, { method: "POST", body: file }, { action: "upload that photo" });
 }

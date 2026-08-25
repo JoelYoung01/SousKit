@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ImageUploadDialog from "@/components/ImageUploadDialog.vue";
+import CoverImagePickerDialog from "@/components/CoverImagePickerDialog.vue";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -7,10 +8,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { paths } from "@/sitemap";
 import { syncAfterRecipeMutation } from "@/stores/sync";
-import type { IngredientCreate, RecipeCreate, RecipeDetail, UploadSlim } from "@/types";
+import type {
+  IngredientCreate,
+  RecipeCoverGenerateResponse,
+  RecipeCreate,
+  RecipeDetail,
+  UploadSlim
+} from "@/types";
 import { ApiError, del, get, getErrorMessage, post, put, toast } from "@/utils";
 import { LoaderCircle, Plus, Sparkles, Trash2 } from "@lucide/vue";
-import { computed, onMounted, reactive } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 type IngredientForm = Partial<IngredientCreate> & { id?: number };
@@ -31,6 +38,8 @@ const saving = ref(false);
 const loading = ref(false);
 const generatingCover = ref(false);
 const coverError = ref("");
+const coverOptions = ref<UploadSlim[]>([]);
+const coverPickerOpen = ref(false);
 const form = reactive<Partial<RecipeCreate>>({
   name: undefined,
   description: undefined,
@@ -79,20 +88,37 @@ async function generateCoverImage() {
   generatingCover.value = true;
   coverError.value = "";
   try {
-    const upload = await post<UploadSlim>("/recipe/generate-cover/", {
+    const result = await post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", {
       name: form.name.trim(),
       description: form.description?.trim() || null,
       ingredients: ingredientForms
         .filter((ing) => ing.name?.trim())
-        .map((ing) => ({ name: ing.name!.trim() }))
+        .map((ing) => ({ name: ing.name!.trim() })),
+      limit: 4
     });
-    form.cover_image_id = upload.id;
+    if (!result.options.length) {
+      coverError.value = "No cover photos found. Try a clearer dish name or upload your own.";
+      return;
+    }
+    if (result.mode === "single" || result.options.length === 1) {
+      form.cover_image_id = result.options[0]!.id;
+      return;
+    }
+    coverOptions.value = result.options;
+    coverPickerOpen.value = true;
   } catch (er) {
     console.error(er);
-    coverError.value = getErrorMessage(er, "Could not find a cover image.");
-    toast.fromError(er, "Could not find a cover image.");
+    coverError.value = getErrorMessage(er, "Could not find cover images.");
+    toast.fromError(er, "Could not find cover images.");
+  } finally {
+    generatingCover.value = false;
   }
-  generatingCover.value = false;
+}
+
+function applyCoverOption(upload: UploadSlim) {
+  form.cover_image_id = upload.id;
+  coverPickerOpen.value = false;
+  coverOptions.value = [];
 }
 
 async function getRecipeDetails() {
@@ -206,8 +232,8 @@ onMounted(() => {
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          Generate pulls a free public-domain food photo from the recipe name and ingredients. Enter
-          a name first.
+          Generate searches free public-domain food photos from the recipe name and shows a few
+          options to pick from. Enter a name first.
         </p>
         <p v-if="coverError" class="text-sm text-destructive">{{ coverError }}</p>
       </div>
@@ -312,5 +338,12 @@ onMounted(() => {
         {{ saving ? "Saving…" : "Save" }}
       </Button>
     </div>
+
+    <CoverImagePickerDialog
+      v-model:open="coverPickerOpen"
+      :options="coverOptions"
+      @select="applyCoverOption"
+      @search-again="generateCoverImage"
+    />
   </div>
 </template>

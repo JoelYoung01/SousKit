@@ -9,6 +9,7 @@ import {
 } from "@/api/recipes";
 import { uploadImage } from "@/api/uploads";
 import { getErrorMessage } from "@/api/errors";
+import { CoverImagePickerSheet } from "@/components/CoverImagePickerSheet";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { colors } from "@/lib/colors";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
-import type { RecipeDetail } from "@/types";
+import type { RecipeDetail, UploadSlim } from "@/types";
 import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -72,6 +73,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   const [uploadingCover, setUploadingCover] = useState(false);
   const [generatingCover, setGeneratingCover] = useState(false);
   const [coverError, setCoverError] = useState("");
+  const [coverOptions, setCoverOptions] = useState<UploadSlim[]>([]);
+  const [coverPickerOpen, setCoverPickerOpen] = useState(false);
 
   useEffect(() => {
     if (creating) return;
@@ -146,21 +149,37 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
     }
   };
 
+  const applyCover = (upload: UploadSlim) => {
+    setCoverImageId(upload.id);
+    setCoverPreviewUrl(upload.url);
+    setCoverOptions([]);
+    setCoverPickerOpen(false);
+  };
+
   const generateCover = async () => {
     if (!canGenerateCover) return;
     setGeneratingCover(true);
     setCoverError("");
     try {
-      const upload = await generateRecipeCover({
+      const result = await generateRecipeCover({
         name: name.trim(),
         description: description.trim() || null,
-        ingredients: ingredients.filter((i) => i.name.trim()).map((i) => ({ name: i.name.trim() }))
+        ingredients: ingredients.filter((i) => i.name.trim()).map((i) => ({ name: i.name.trim() })),
+        limit: 4
       });
-      setCoverImageId(upload.id);
-      setCoverPreviewUrl(upload.url);
+      if (!result.options.length) {
+        setCoverError("No cover photos found. Try a clearer dish name or upload your own.");
+        return;
+      }
+      if (result.mode === "single" || result.options.length === 1) {
+        applyCover(result.options[0]!);
+        return;
+      }
+      setCoverOptions(result.options);
+      setCoverPickerOpen(true);
     } catch (er) {
-      setCoverError(getErrorMessage(er, "Could not find a cover image."));
-      toast.fromError(er, "Could not find a cover image.");
+      setCoverError(getErrorMessage(er, "Could not find cover images."));
+      toast.fromError(er, "Could not find cover images.");
     } finally {
       setGeneratingCover(false);
     }
@@ -269,8 +288,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             </Button>
           </View>
           <Text className="text-xs leading-4 text-muted-foreground">
-            Generate pulls a free public-domain food photo from the recipe name and ingredients.
-            Enter a name first.
+            Generate searches free public-domain food photos from the recipe name and shows a few
+            options to pick from. Enter a name first.
           </Text>
           {coverError ? <Text className="text-sm text-destructive">{coverError}</Text> : null}
         </View>
@@ -381,6 +400,17 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
           </Button>
         </View>
       </KeyboardStickyView>
+
+      <CoverImagePickerSheet
+        visible={coverPickerOpen}
+        options={coverOptions}
+        onSelect={applyCover}
+        onClose={() => setCoverPickerOpen(false)}
+        onSearchAgain={() => {
+          setCoverPickerOpen(false);
+          void generateCover();
+        }}
+      />
     </View>
   );
 }
