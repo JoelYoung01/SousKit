@@ -1,42 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <rect width="1024" height="1024" fill="#090b09"/>
 
-  <!-- Chef's knife. Straight spine at x=520 from tip through the handle so the
-       fork can sit flush without a leftward scooch. Heel still steps in on the
-       cutting-edge side for a clear blade/handle read. -->
-  <path fill="#f4f7f5" d="M 374 807
-    L 374 632
-    A 16 16 0 0 0 358 616
-    L 346 616
-    A 16 16 0 0 1 330 600
-    C 330 460 340 280 432 196
-    C 462 158 500 138 514 168
-    C 518 178 520 188 520 202
-    L 520 807
-    A 73 73 0 0 1 374 807 Z"/>
+  <!-- Slimmer chef's knife. Spine at x=512; handle 80 wide (432–512); blade ~112
+       wide. Heel still steps in on the cutting-edge side. -->
+  <path fill="#f4f7f5" d="M 432 820
+    L 432 650
+    A 12 12 0 0 0 420 638
+    L 412 638
+    A 12 12 0 0 1 400 626
+    C 400 485 414 305 470 212
+    C 490 178 506 160 510 182
+    C 512 190 512 200 512 212
+    L 512 820
+    A 40 40 0 0 1 432 820 Z"/>
 
-  <!-- Fork. Left edge is the shared straight spine. Right side tapers once from
-       the tine head into the handle — no inward hip / waist. -->
-  <path fill="#22c55e" d="M 520 323
-    A 15 15 0 0 1 550 323
-    L 550 493
-    A 9 9 0 0 0 568 493
-    L 568 323
-    A 15 15 0 0 1 598 323
-    L 598 493
-    A 9 9 0 0 0 616 493
-    L 616 323
-    A 15 15 0 0 1 646 323
-    L 646 493
-    A 9 9 0 0 0 664 493
-    L 664 323
-    A 15 15 0 0 1 694 323
-    L 694 520
-    C 694 590 666 620 666 700
-    L 666 807
-    A 73 73 0 0 1 520 807
-    L 520 323 Z"/>
+  <!-- 3-tine fork. Head ~126 wide, handle 80 wide with a stronger inward slope. -->
+  <path fill="#22c55e" d="M 512 308
+    A 15 15 0 0 1 542 308
+    L 542 488
+    A 9 9 0 0 0 560 488
+    L 560 308
+    A 15 15 0 0 1 590 308
+    L 590 488
+    A 9 9 0 0 0 608 488
+    L 608 308
+    A 15 15 0 0 1 638 308
+    L 638 510
+    C 638 570 592 625 592 720
+    L 592 820
+    A 40 40 0 0 1 512 820
+    L 512 308 Z"/>
 
   <!-- Rivet -->
-  <circle cx="447" cy="806" r="22" fill="#22c55e"/>
+  <circle cx="472" cy="818" r="16" fill="#22c55e"/>
 </svg>
