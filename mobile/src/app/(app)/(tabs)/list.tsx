@@ -3,24 +3,28 @@ import { SwipeRow } from "@/components/SwipeRow";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
 import {
   useCreateManualGroceryItem,
   useDeleteManualGroceryItem,
   useGroceryList,
-  useSetGroceryStatus
+  useSetGroceryStatus,
+  useUpdateManualGroceryItem
 } from "@/hooks/use-grocery";
 import { colors } from "@/lib/colors";
 import { formatShortRange } from "@/lib/dates";
 import { getErrorMessage } from "@/api/errors";
+import { showGroceryItemContextMenu } from "@/lib/grocery-item-menu";
 import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
 import type { GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
 import { EyeOff, Plus, ShoppingCart } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
+import { ScrollView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /** How long a crossed-off item stays visible so the user can undo. */
@@ -31,6 +35,8 @@ export default function GroceryListScreen() {
   const insets = useSafeAreaInsets();
   const [showDismissed, setShowDismissed] = useState(false);
   const [newItemName, setNewItemName] = useState("");
+  const [editingItem, setEditingItem] = useState<GroceryItem | null>(null);
+  const [editName, setEditName] = useState("");
   const [pendingHideKeys, setPendingHideKeys] = useState<Set<string>>(() => new Set());
   const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -38,6 +44,7 @@ export default function GroceryListScreen() {
   const setStatus = useSetGroceryStatus();
   const createManual = useCreateManualGroceryItem();
   const deleteManual = useDeleteManualGroceryItem();
+  const updateManual = useUpdateManualGroceryItem();
 
   const items = useMemo(() => list.data?.items ?? [], [list.data]);
 
@@ -147,6 +154,59 @@ export default function GroceryListScreen() {
     const recipe = item.recipes[0];
     if (!recipe) return;
     router.push(paths.recipeDetail(recipe.id) as never);
+  }
+
+  function onEdit(item: GroceryItem) {
+    if (item.is_manual && item.manual_item_ids.length > 0) {
+      setEditingItem(item);
+      setEditName(item.name);
+      return;
+    }
+    const recipe = item.recipes[0];
+    if (recipe) {
+      router.push(paths.recipeEdit(recipe.id) as never);
+    }
+  }
+
+  function onSaveEdit() {
+    if (!editingItem) return;
+    const name = editName.trim();
+    const manualId = editingItem.manual_item_ids[0];
+    if (!name || manualId === undefined || updateManual.isPending) return;
+    updateManual.mutate(
+      { itemId: manualId, body: { name } },
+      {
+        onSuccess: () => {
+          setEditingItem(null);
+          setEditName("");
+        }
+      }
+    );
+  }
+
+  function onRowLongPress(item: GroceryItem) {
+    if (Platform.OS !== "ios") return;
+    tapHaptic();
+    showGroceryItemContextMenu(item, (action) => {
+      switch (action) {
+        case "edit":
+          onEdit(item);
+          break;
+        case "view-recipe":
+          onViewRecipe(item);
+          break;
+        case "dismiss":
+          if (item.dismissed) {
+            setStatus.mutate({ item, status: item.auto_dismissed ? "restored" : null });
+          } else {
+            queueHide(item);
+          }
+          break;
+        case "delete":
+          onDelete(item);
+          break;
+      }
+    });
   }
 
   return (
@@ -301,6 +361,8 @@ export default function GroceryListScreen() {
                           crossed ? `Restore ${item.name}` : `Cross off ${item.name}`
                         }
                         onPress={() => onRowTap(item)}
+                        onLongPress={() => onRowLongPress(item)}
+                        delayLongPress={400}
                         className={
                           crossed
                             ? "flex-row items-start gap-3 rounded-xl border border-border px-3 py-3 opacity-55"
@@ -348,6 +410,40 @@ export default function GroceryListScreen() {
           ))}
         </View>
       )}
+
+      <Sheet visible={editingItem !== null} onClose={() => setEditingItem(null)}>
+        <View className="gap-4">
+          <Text className="font-sans-bold text-lg">Edit item</Text>
+          <Input
+            className="bg-card"
+            value={editName}
+            onChangeText={setEditName}
+            placeholder="Item name"
+            autoCapitalize="sentences"
+            returnKeyType="done"
+            onSubmitEditing={onSaveEdit}
+            editable={!updateManual.isPending}
+            autoFocus
+          />
+          <View className="flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onPress={() => setEditingItem(null)}
+              disabled={updateManual.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="flex-1"
+              onPress={onSaveEdit}
+              disabled={!editName.trim() || updateManual.isPending}
+            >
+              Save
+            </Button>
+          </View>
+        </View>
+      </Sheet>
     </ScrollView>
   );
 }

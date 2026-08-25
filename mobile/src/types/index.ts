@@ -130,6 +130,12 @@ export interface GroceryManualItemCreate {
   units?: string | null;
 }
 
+export interface GroceryManualItemUpdate {
+  name: string;
+  amount?: number | null;
+  units?: string | null;
+}
+
 export interface GroceryListResponse {
   window_start: string;
   window_end: string;
