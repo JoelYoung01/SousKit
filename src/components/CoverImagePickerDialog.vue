@@ -30,14 +30,22 @@ watch(
       selectedId.value = options[0]?.id ?? null;
     }
     if (!isOpen) selectedId.value = null;
-  }
+  },
+  { immediate: true }
 );
 
 const canConfirm = computed(() => selectedId.value != null);
 
+function selectOption(id: number) {
+  selectedId.value = id;
+}
+
 function confirm() {
   const chosen = props.options.find((o) => o.id === selectedId.value) ?? props.options[0];
-  if (chosen) emit("select", chosen);
+  if (chosen) {
+    emit("select", chosen);
+    open.value = false;
+  }
 }
 
 function searchAgain() {
@@ -66,7 +74,7 @@ function searchAgain() {
               ? 'border-[#22c55e]'
               : 'border-border hover:border-muted-foreground/40'
           "
-          @click="selectedId = option.id"
+          @click="selectOption(option.id)"
         >
           <img :src="mediaUrl(option.url)" alt="Cover option" class="h-28 w-full object-cover" />
         </button>

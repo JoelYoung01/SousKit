@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { mediaUrl } from "@/lib/media";
 import { paths } from "@/sitemap";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import type {
@@ -17,7 +18,7 @@ import type {
 } from "@/types";
 import { ApiError, del, get, getErrorMessage, post, put, toast } from "@/utils";
 import { LoaderCircle, Plus, Sparkles, Trash2 } from "@lucide/vue";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 type IngredientForm = Partial<IngredientCreate> & { id?: number };
@@ -40,6 +41,12 @@ const generatingCover = ref(false);
 const coverError = ref("");
 const coverOptions = ref<UploadSlim[]>([]);
 const coverPickerOpen = ref(false);
+const coverPreviewUrl = ref<string>("");
+
+const coverPreviewSrc = computed(() =>
+  coverPreviewUrl.value ? mediaUrl(coverPreviewUrl.value) : ""
+);
+
 const form = reactive<Partial<RecipeCreate>>({
   name: undefined,
   description: undefined,
@@ -49,6 +56,21 @@ const form = reactive<Partial<RecipeCreate>>({
   prep_time: undefined,
   cover_image_id: undefined
 });
+watch(
+  () => form.cover_image_id,
+  async (id) => {
+    if (!id) {
+      coverPreviewUrl.value = "";
+      return;
+    }
+    try {
+      const upload = await get<UploadSlim>(`/upload/${id}/`);
+      coverPreviewUrl.value = upload.url;
+    } catch {
+      /* preview is best-effort */
+    }
+  }
+);
 const ingredientForms = reactive<IngredientForm[]>([]);
 
 const creating = computed(() => route.name === "recipe-new");
@@ -101,7 +123,7 @@ async function generateCoverImage() {
       return;
     }
     if (result.mode === "single" || result.options.length === 1) {
-      form.cover_image_id = result.options[0]!.id;
+      applyCoverOption(result.options[0]!);
       return;
     }
     coverOptions.value = result.options;
@@ -117,6 +139,7 @@ async function generateCoverImage() {
 
 function applyCoverOption(upload: UploadSlim) {
   form.cover_image_id = upload.id;
+  coverPreviewUrl.value = upload.url;
   coverPickerOpen.value = false;
   coverOptions.value = [];
 }
@@ -185,6 +208,7 @@ function fillForms() {
     // @ts-expect-error keyed assign from detail
     form[key] = recipeDetail.value[key] ?? null;
   }
+  coverPreviewUrl.value = recipeDetail.value.cover_image?.url ?? "";
   ingredientForms.splice(0);
   for (const ingredient of recipeDetail.value.ingredients) {
     ingredientForms.push({
@@ -217,6 +241,12 @@ onMounted(() => {
 
     <form class="mt-4 flex flex-col gap-4" @submit.prevent="saveChanges">
       <div class="space-y-2">
+        <img
+          v-if="coverPreviewUrl"
+          :src="coverPreviewSrc"
+          alt="Recipe cover"
+          class="h-40 w-full rounded-xl object-cover"
+        />
         <div class="flex flex-wrap items-center gap-2">
           <ImageUploadDialog v-model="form.cover_image_id" />
           <Button
