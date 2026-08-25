@@ -41,7 +41,10 @@ describe("uploadImage (native)", () => {
     const payload: UploadSlim = {
       id: 9,
       name: "cover.jpg",
-      url: "/uploads/2/cover.jpg"
+      url: "/uploads/2/cover.jpg",
+      file_path: "uploads/2/cover.jpg",
+      created_on: "2026-08-25T00:00:00Z",
+      created_by_id: 1
     };
     mockUpload.mockResolvedValue({
       status: 200,

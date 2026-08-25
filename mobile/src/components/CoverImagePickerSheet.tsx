@@ -8,7 +8,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Image } from "expo-image";
 import { X } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 /** Bottom sheet: pick one of several searched cover photos. */
@@ -31,17 +31,18 @@ export function CoverImagePickerSheet({
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!visible) {
-      setSelectedId(null);
-      return;
+  const activeId = (() => {
+    if (!visible || !options.length) return null;
+    if (selectedId !== null && options.some((o) => o.id === selectedId)) {
+      return selectedId;
     }
-    if (!options.some((o) => o.id === selectedId)) {
-      setSelectedId(options[0]?.id ?? null);
-    }
-  }, [visible, options, selectedId]);
+    return options[0]?.id ?? null;
+  })();
 
-  const activeId = selectedId ?? options[0]?.id ?? null;
+  const handleClose = () => {
+    setSelectedId(null);
+    onClose();
+  };
 
   const confirm = () => {
     const chosen = options.find((o) => o.id === activeId) ?? options[0];
@@ -50,7 +51,7 @@ export function CoverImagePickerSheet({
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} className="px-0 pb-0 pt-1" fullHeight>
+    <Sheet visible={visible} onClose={handleClose} className="px-0 pb-0 pt-1" fullHeight>
       <ScrollView
         className="px-4"
         keyboardShouldPersistTaps="handled"
@@ -126,7 +127,7 @@ export function CoverImagePickerSheet({
               Search again
             </Button>
           ) : null}
-          <Button variant="outline" onPress={onClose}>
+          <Button variant="outline" onPress={handleClose}>
             Cancel
           </Button>
         </View>
