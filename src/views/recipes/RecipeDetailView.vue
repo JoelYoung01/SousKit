@@ -15,6 +15,11 @@ import { useSessionStore } from "@/stores/session";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import { paths } from "@/sitemap";
 import type { RecipeDetail } from "@/types";
+import {
+  formatIngredientAmountUnits,
+  ingredientHasAmountOrUnits,
+  normalizeIngredientDetails
+} from "@/utils/ingredients";
 import { ApiError, del, get, post, toast } from "@/utils";
 import { fetchHousehold } from "@/utils/household";
 import { ArrowLeft, LoaderCircle, Pencil, Sparkles } from "@lucide/vue";
@@ -51,6 +56,14 @@ const returnUrl = computed(() => {
 const imageUrl = computed(() => mediaUrl(recipe.value?.cover_image?.url));
 const formattedTime = computed(() => formatPrepTime(recipe.value?.prep_time) || "—");
 const canAiSave = computed(() => aiInstruction.value.trim().length > 0 && !aiSaving.value);
+const displayedIngredients = computed(() =>
+  (recipe.value?.ingredients ?? []).map((ingredient) => ({
+    ...ingredient,
+    amountUnits: formatIngredientAmountUnits(ingredient.amount, ingredient.units),
+    hasAmountUnits: ingredientHasAmountOrUnits(ingredient.amount, ingredient.units),
+    detailsText: normalizeIngredientDetails(ingredient.details)
+  }))
+);
 
 watch(aiEditOpen, (open) => {
   if (open) {
@@ -207,15 +220,18 @@ onMounted(async () => {
         <h2 class="mb-2 text-sm font-semibold">Ingredients</h2>
         <ul class="space-y-1.5 text-base">
           <li
-            v-for="ingredient in recipe.ingredients"
+            v-for="ingredient in displayedIngredients"
             :key="ingredient.id"
             class="rounded-lg bg-secondary/40 px-3 py-2"
           >
-            <span class="text-muted-foreground"
-              >{{ ingredient.amount }} {{ ingredient.units }}</span
-            >
-            — {{ ingredient.name }}
-            <span v-if="ingredient.details" class="text-faint"> ({{ ingredient.details }}) </span>
+            <span v-if="ingredient.hasAmountUnits" class="text-muted-foreground">
+              {{ ingredient.amountUnits }}
+            </span>
+            <template v-if="ingredient.hasAmountUnits"> • </template>
+            {{ ingredient.name }}
+            <span v-if="ingredient.detailsText" class="text-faint">
+              ({{ ingredient.detailsText }})
+            </span>
           </li>
         </ul>
       </section>
