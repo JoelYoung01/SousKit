@@ -23,6 +23,7 @@ from api.schemas import (
     MealPlanWizardCommitRequest,
     MealPlanWizardCreate,
     MealPlanWizardDaysUpdate,
+    MealPlanWizardFreeformBuildRequest,
     MealPlanWizardPrefs,
     MealPlanWizardRefineRequest,
     MealPlanWizardRewindRequest,
@@ -255,6 +256,39 @@ async def build(
                     yield event
         except Exception as exc:
             logger.exception("meal-plan wizard build failed for %s", session_id)
+            yield ProgressEvent(
+                stage="build",
+                status="error",
+                message=str(exc) or "Recipe build failed.",
+                progress=0,
+            )
+
+    return StreamingResponse(_sse(gen()), media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/build-freeform/")
+async def build_freeform(
+    session_id: str,
+    current_user: CurrentUserDep,
+    body: MealPlanWizardFreeformBuildRequest,
+):
+    session = _get_owned_session(session_id, current_user.id)
+
+    async def gen():
+        try:
+            with Session(engine) as db:
+                async for event in pipeline.run_freeform_build(
+                    session,
+                    db,
+                    current_user,
+                    prompt=body.prompt,
+                    refinement=body.refinement,
+                    idea_ids=body.idea_ids,
+                ):
+                    wizard_sessions.touch(session)
+                    yield event
+        except Exception as exc:
+            logger.exception("meal-plan wizard freeform build failed for %s", session_id)
             yield ProgressEvent(
                 stage="build",
                 status="error",

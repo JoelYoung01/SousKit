@@ -7,6 +7,7 @@ import {
   rewindWizard,
   selectWizardIdeas,
   streamBuild,
+  streamFreeformBuild,
   streamIdeate,
   updateWizardDays,
   updateWizardPrefs
@@ -51,6 +52,7 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** Days offered when optionally assigning a created recipe to a night. */
 const ASSIGN_DAY_COUNT = 14;
 type UiStep = "days" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type InputMode = "structured" | "simple";
 
 export default function MealPlanWizardScreen() {
   const router = useRouter();
@@ -61,9 +63,17 @@ export default function MealPlanWizardScreen() {
   const today = useMemo(() => startOfDay(), []);
   /** Ad-hoc create from Home / + menu — one recipe; day assign is optional at the end. */
   const recipeMode = params.mode === "recipe";
-  const STEP_ORDER: UiStep[] = recipeMode
-    ? ["prefs", "ideate", "select", "build", "review", "assign"]
-    : ["days", "prefs", "ideate", "select", "build", "review"];
+  /** Structured week form vs single free-text prompt (like AI edit). */
+  const [inputMode, setInputMode] = useState<InputMode>(recipeMode ? "simple" : "structured");
+  const [simplePrompt, setSimplePrompt] = useState("");
+  const STEP_ORDER: UiStep[] =
+    inputMode === "simple"
+      ? recipeMode
+        ? ["prefs", "build", "review", "assign"]
+        : ["days", "prefs", "build", "review"]
+      : recipeMode
+        ? ["prefs", "ideate", "select", "build", "review", "assign"]
+        : ["days", "prefs", "ideate", "select", "build", "review"];
 
   const [uiStep, setUiStep] = useState<UiStep>(recipeMode ? "prefs" : "days");
   const [session, setSession] = useState<MealPlanWizardSession | null>(null);
@@ -125,6 +135,7 @@ export default function MealPlanWizardScreen() {
   const alreadyPlannedCount = Object.keys(plannedTitles).length;
   const selectionFull = selectedIdeaIds.length >= selectCount && selectCount > 0;
   const canContinueSelect = selectedIdeaIds.length === selectCount && selectCount > 0;
+  const canContinueSimple = Boolean(simplePrompt.trim()) && !busy;
   const canRefineRecipes = Boolean(refineText.trim()) && regenIdeaIds.length > 0 && !busy;
   const stepIndex = STEP_ORDER.indexOf(uiStep);
 
@@ -149,7 +160,7 @@ export default function MealPlanWizardScreen() {
   const headerTitle = recipeMode
     ? {
         days: "Create a recipe",
-        prefs: "What are you craving?",
+        prefs: inputMode === "simple" ? "Describe your recipe" : "What are you craving?",
         ideate: "Cooking up ideas",
         select: "Pick one idea",
         build: "Building your recipe",
@@ -158,7 +169,7 @@ export default function MealPlanWizardScreen() {
       }[uiStep]
     : {
         days: "Which nights?",
-        prefs: "Set the vibe",
+        prefs: inputMode === "simple" ? "Describe your dinners" : "Set the vibe",
         ideate: "Cooking up ideas",
         select: "Pick your dinners",
         build: "Building recipes",
@@ -268,6 +279,55 @@ export default function MealPlanWizardScreen() {
     setSession(fresh);
     sessionRef.current = fresh;
     return fresh;
+  };
+
+  const runFreeformBuild = async (refinement?: string, ideaIds?: string[]) => {
+    const prompt = simplePrompt.trim();
+    if (!prompt && !refinement) {
+      setError("Describe what you’d like to cook.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    setRunning(true);
+    setLiveEvents([]);
+    setUiStep("build");
+    let sawError = false;
+    const controller = new AbortController();
+    try {
+      const s = await syncDaysAndPrefs();
+      abortRef.current?.abort();
+      abortRef.current = controller;
+      await streamFreeformBuild(
+        s.id,
+        {
+          prompt,
+          refinement: refinement || null,
+          idea_ids: ideaIds?.length ? ideaIds : null
+        },
+        (event) => {
+          if (event.status === "done") return;
+          setLiveEvents((ev) => [...ev, event]);
+          if (event.status === "error") {
+            sawError = true;
+            setError(event.message);
+          }
+        },
+        controller.signal
+      );
+      await refreshSession();
+      setRefineText("");
+      setRegenIdeaIds([]);
+      if (!sawError) setUiStep("review");
+    } catch (e) {
+      if (!controller.signal.aborted && (e as Error).name !== "AbortError") {
+        setError(getErrorMessage(e, "Build failed"));
+        toast.fromError(e, "Build failed");
+      }
+    } finally {
+      setRunning(false);
+      setBusy(false);
+    }
   };
 
   const runIdeate = async (refinement?: string) => {
@@ -397,7 +457,11 @@ export default function MealPlanWizardScreen() {
         setError("Mark at least one dinner to regenerate.");
         return;
       }
-      await runBuild(text, [...regenIdeaIds]);
+      if (inputMode === "simple") {
+        await runFreeformBuild(text, [...regenIdeaIds]);
+      } else {
+        await runBuild(text, [...regenIdeaIds]);
+      }
     }
   };
 
@@ -455,8 +519,8 @@ export default function MealPlanWizardScreen() {
       prefs: recipeMode ? "prefs" : "days",
       ideate: "prefs",
       select: "prefs",
-      build: "select",
-      review: "select",
+      build: inputMode === "simple" ? "prefs" : "select",
+      review: inputMode === "simple" ? "prefs" : "select",
       assign: "review"
     };
     abortRef.current?.abort();
@@ -756,10 +820,64 @@ export default function MealPlanWizardScreen() {
         {/* PREFS */}
         {uiStep === "prefs" ? (
           <View className="mt-5">
-            <Text className="mb-4 text-sm text-muted-foreground">
-              Everything here is optional. We’ll remember goals and diet for next time.
-            </Text>
-            <WizardPrefsFields prefs={localPrefs} onChange={setLocalPrefs} />
+            <View className="mb-4 flex-row rounded-xl border border-border bg-secondary/40 p-1">
+              <Pressable
+                className={`flex-1 rounded-lg px-3 py-2 ${inputMode === "simple" ? "bg-card" : ""}`}
+                onPress={() => {
+                  tapHaptic();
+                  setInputMode("simple");
+                }}
+              >
+                <Text
+                  className={`text-center text-sm font-sans-semibold ${
+                    inputMode === "simple" ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  Describe it
+                </Text>
+              </Pressable>
+              <Pressable
+                className={`flex-1 rounded-lg px-3 py-2 ${inputMode === "structured" ? "bg-card" : ""}`}
+                onPress={() => {
+                  tapHaptic();
+                  setInputMode("structured");
+                }}
+              >
+                <Text
+                  className={`text-center text-sm font-sans-semibold ${
+                    inputMode === "structured" ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  Week form
+                </Text>
+              </Pressable>
+            </View>
+
+            {inputMode === "simple" ? (
+              <>
+                <Text className="mb-3 text-sm text-muted-foreground">
+                  {recipeMode
+                    ? "Describe the recipe you want — ingredients, style, dietary needs, etc."
+                    : `Describe dinners for your ${selectedDays.length} selected night${selectedDays.length === 1 ? "" : "s"}.`}
+                </Text>
+                <Textarea
+                  value={simplePrompt}
+                  onChangeText={setSimplePrompt}
+                  editable={!busy}
+                  placeholder="e.g. Spicy Thai basil chicken with jasmine rice, under 30 minutes and dairy-free"
+                  className="min-h-[128px] rounded-xl"
+                  autoFocus
+                />
+              </>
+            ) : (
+              <>
+                <Text className="mb-4 text-sm text-muted-foreground">
+                  Everything here is optional. We’ll remember goals and diet for next time.
+                </Text>
+                <WizardPrefsFields prefs={localPrefs} onChange={setLocalPrefs} />
+              </>
+            )}
+
             <View className="mt-5 flex-row gap-2">
               <Button
                 variant="outline"
@@ -769,10 +887,23 @@ export default function MealPlanWizardScreen() {
               >
                 Back
               </Button>
-              <Button className="flex-1" disabled={busy} onPress={() => void runIdeate()}>
-                <Sparkles size={14} color={colors.foreground} />
-                Generate ideas
-              </Button>
+              {inputMode === "simple" ? (
+                <Button
+                  className="flex-1"
+                  disabled={!canContinueSimple}
+                  onPress={() => void runFreeformBuild()}
+                >
+                  <Sparkles size={14} color={colors.foreground} />
+                  {recipeMode
+                    ? "Generate recipe"
+                    : `Build ${selectedDays.length} dinner${selectedDays.length === 1 ? "" : "s"}`}
+                </Button>
+              ) : (
+                <Button className="flex-1" disabled={busy} onPress={() => void runIdeate()}>
+                  <Sparkles size={14} color={colors.foreground} />
+                  Generate ideas
+                </Button>
+              )}
             </View>
           </View>
         ) : null}
@@ -787,17 +918,27 @@ export default function MealPlanWizardScreen() {
               subtitle={
                 uiStep === "ideate"
                   ? `Aiming for ${session?.idea_target_count ?? selectedDays.length + 5} options`
-                  : `Building ${selectCount} recipes from your picks`
+                  : inputMode === "simple"
+                    ? recipeMode
+                      ? "Writing your recipe from your description"
+                      : `Writing ${selectCount} recipes from your description`
+                    : `Building ${selectCount} recipes from your picks`
               }
             />
             {!running && error ? (
               <View className="flex-row gap-2">
                 <Button variant="outline" className="flex-1" onPress={() => void rewindTo("prefs")}>
-                  Edit prefs
+                  Edit input
                 </Button>
                 <Button
                   className="flex-1"
-                  onPress={() => (uiStep === "ideate" ? void runIdeate() : void runBuild())}
+                  onPress={() =>
+                    uiStep === "ideate"
+                      ? void runIdeate()
+                      : inputMode === "simple"
+                        ? void runFreeformBuild()
+                        : void runBuild()
+                  }
                 >
                   Retry
                 </Button>
