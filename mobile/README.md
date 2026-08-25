@@ -140,5 +140,5 @@ mobile/
     stores/              zustand stores
     lib/                 colors, query client, biometrics, …
     types/               shared API types (mirror web `src/types/`)
-  assets/images/         icon, splash, chef-hat
+  assets/images/         icon, splash, souskit-mark
 ```
