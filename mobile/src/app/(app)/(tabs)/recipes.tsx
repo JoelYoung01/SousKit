@@ -67,8 +67,8 @@ export default function RecipesScreen() {
         contentContainerStyle={{
           paddingTop: insets.top + 20,
           paddingHorizontal: 16,
-          // Room for collapsed search FAB above the tab bar
-          paddingBottom: 108
+          // Room for collapsed search FAB (56px) + bottom margin
+          paddingBottom: 72
         }}
         data={showSkeleton ? [] : data}
         keyExtractor={(r) => String(r.id)}

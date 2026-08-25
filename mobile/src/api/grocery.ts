@@ -3,6 +3,7 @@ import type {
   GroceryItemStatus,
   GroceryListResponse,
   GroceryManualItemCreate,
+  GroceryManualItemUpdate,
   GrocerySummaryResponse
 } from "@/types";
 import { del, get, post, put } from "./client";
@@ -26,6 +27,13 @@ export function createManualGroceryItem(
   body: GroceryManualItemCreate
 ): Promise<GroceryItem> {
   return post<GroceryItem>("/grocery/items/", body);
+}
+
+export function updateManualGroceryItem(
+  itemId: number,
+  body: GroceryManualItemUpdate
+): Promise<GroceryItem> {
+  return put<GroceryItem>(`/grocery/items/${itemId}/`, body);
 }
 
 export function deleteManualGroceryItem(itemId: number): Promise<void> {

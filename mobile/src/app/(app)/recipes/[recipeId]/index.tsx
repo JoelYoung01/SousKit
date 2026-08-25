@@ -8,6 +8,11 @@ import { Text } from "@/components/ui/text";
 import { colors } from "@/lib/colors";
 import { formatPrepTime } from "@/lib/dates";
 import { tapHaptic } from "@/lib/haptics";
+import {
+  formatIngredientAmountUnits,
+  ingredientHasAmountOrUnits,
+  normalizeIngredientDetails
+} from "@/lib/ingredients";
 import { splitInstructionSteps } from "@/lib/instructions";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
@@ -196,20 +201,30 @@ export default function RecipeDetailScreen() {
               >
                 <Text className="mb-2 font-sans-semibold text-sm">Ingredients</Text>
                 <View className="gap-1.5">
-                  {recipe.ingredients.map((ingredient) => (
-                    <View key={ingredient.id} className="rounded-lg bg-secondary/40 px-3 py-2">
-                      <Text className="text-base leading-6">
-                        <Text className="text-muted-foreground">
-                          {ingredient.amount ?? ""} {ingredient.units ?? ""}
+                  {recipe.ingredients.map((ingredient) => {
+                    const amountUnits = formatIngredientAmountUnits(
+                      ingredient.amount,
+                      ingredient.units
+                    );
+                    const details = normalizeIngredientDetails(ingredient.details);
+
+                    return (
+                      <View key={ingredient.id} className="rounded-lg bg-secondary/40 px-3 py-2">
+                        <Text className="text-base leading-6">
+                          {amountUnits ? (
+                            <Text className="text-muted-foreground">{amountUnits}</Text>
+                          ) : null}
+                          {ingredientHasAmountOrUnits(ingredient.amount, ingredient.units)
+                            ? " • "
+                            : ""}
+                          {ingredient.name}
+                          {details ? (
+                            <Text className="text-faint"> ({details})</Text>
+                          ) : null}
                         </Text>
-                        {ingredient.amount !== null || ingredient.units ? " — " : ""}
-                        {ingredient.name}
-                        {ingredient.details ? (
-                          <Text className="text-faint"> ({ingredient.details})</Text>
-                        ) : null}
-                      </Text>
-                    </View>
-                  ))}
+                      </View>
+                    );
+                  })}
                   {recipe.ingredients.length === 0 ? (
                     <Text className="text-sm text-muted-foreground">No ingredients listed.</Text>
                   ) : null}

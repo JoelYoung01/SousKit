@@ -12,8 +12,6 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import { useKeyboardState } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Props = {
   value: string;
@@ -25,16 +23,14 @@ type Props = {
  * full-width bar that sticks to the top of the keyboard via KeyboardStickyView.
  */
 export function RecipeSearchFab({ value, onChangeText }: Props) {
-  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const [progress] = useState(() => new Animated.Value(0));
 
-  // Tab bar ~64px + safe area when keyboard is hidden; flush when keyboard up
-  // (AppTabBar returns null while the keyboard is visible).
-  const collapsedBottom = (keyboardVisible ? 12 : 72) + insets.bottom;
+  // Screen content already sits above AppTabBar — only add a small margin from
+  // the content bottom. Tab bar hides while the keyboard is visible.
+  const collapsedBottom = 16;
   const sidePad = 16;
   const fabSize = 56;
   const barHeight = 52;

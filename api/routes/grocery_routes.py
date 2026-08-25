@@ -26,6 +26,7 @@ from api.schemas import (
     GroceryItemStateUpdate,
     GroceryListResponse,
     GroceryManualItemCreate,
+    GroceryManualItemUpdate,
     GroceryQuantity,
     GrocerySummaryResponse,
 )
@@ -173,6 +174,58 @@ def create_manual_grocery_item(
         units=(body.units or "").strip() or None,
         created_on=datetime.now(UTC),
     )
+    session.add(manual)
+    session.commit()
+    session.refresh(manual)
+
+    grocery = get_grocery_list(
+        current_user=current_user, session=session, include_deleted=True
+    )
+    for item in grocery.items:
+        if item.key == key:
+            return item
+
+    return GroceryItem(
+        key=key,
+        name=name,
+        category=infer_category(name),
+        quantities=[GroceryQuantity(amount=body.amount, units=manual.units)],
+        quantity_display="",
+        recipes=[],
+        recipe_titles="Added manually",
+        source_ingredient_ids=[],
+        manual_item_ids=[manual.id],
+        is_manual=True,
+        dismissed=False,
+        auto_dismissed=False,
+        deleted=False,
+    )
+
+
+@router.put("/items/{item_id}/", response_model=GroceryItem)
+def update_manual_grocery_item(
+    item_id: int,
+    body: GroceryManualItemUpdate,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Enter an item name.")
+
+    household, _ = require_membership(session, current_user)
+    manual = session.get(GroceryManualItem, item_id)
+    if not manual or manual.household_id != household.id:
+        raise HTTPException(status_code=404, detail="That grocery item couldn’t be found.")
+
+    key = normalize_item_key(name)
+    if not key:
+        raise HTTPException(status_code=400, detail="Enter an item name.")
+
+    manual.name = name
+    manual.item_key = key
+    manual.amount = body.amount
+    manual.units = (body.units or "").strip() or None
     session.add(manual)
     session.commit()
     session.refresh(manual)
