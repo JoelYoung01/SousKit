@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import chefHat from "@/assets/chef-hat.png";
+import souskitMark from "@/assets/souskit-mark.png";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,7 +91,7 @@ async function onResend() {
     class="app-scroll flex h-full min-h-0 flex-col items-center justify-center gap-8 overflow-y-auto overscroll-y-contain bg-gradient-to-b from-elevated via-background to-background px-6 py-10"
   >
     <div class="flex flex-col items-center gap-3 text-center">
-      <img :src="chefHat" alt="" class="size-16 object-contain" />
+      <img :src="souskitMark" alt="" class="size-16 object-contain" />
       <h1 class="text-3xl font-bold tracking-tight text-foreground">
         {{ appTitle }}
       </h1>

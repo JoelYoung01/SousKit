@@ -82,7 +82,7 @@ export default function VerifyEmailScreen() {
     >
         <View className="items-center gap-3">
           <Image
-            source={require("@/assets/images/chef-hat.png")}
+            source={require("@/assets/images/souskit-mark.png")}
             style={{ width: 64, height: 64 }}
             contentFit="contain"
           />

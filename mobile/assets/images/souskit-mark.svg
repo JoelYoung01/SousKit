@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#090b09"/>
+
+  <!-- Slimmer chef's knife. Spine at x=512; handle 80 wide (432–512); blade ~112
+       wide. Heel still steps in on the cutting-edge side. -->
+  <path fill="#f4f7f5" d="M 432 820
+    L 432 650
+    A 12 12 0 0 0 420 638
+    L 412 638
+    A 12 12 0 0 1 400 626
+    C 400 485 414 305 470 212
+    C 490 178 506 160 510 182
+    C 512 190 512 200 512 212
+    L 512 820
+    A 40 40 0 0 1 432 820 Z"/>
+
+  <!-- 3-tine fork. Head ~126 wide, handle 80 wide with a stronger inward slope. -->
+  <path fill="#22c55e" d="M 512 308
+    A 15 15 0 0 1 542 308
+    L 542 488
+    A 9 9 0 0 0 560 488
+    L 560 308
+    A 15 15 0 0 1 590 308
+    L 590 488
+    A 9 9 0 0 0 608 488
+    L 608 308
+    A 15 15 0 0 1 638 308
+    L 638 510
+    C 638 570 592 625 592 720
+    L 592 820
+    A 40 40 0 0 1 512 820
+    L 512 308 Z"/>
+
+  <!-- Rivet -->
+  <circle cx="472" cy="818" r="16" fill="#22c55e"/>
+</svg>

@@ -57,7 +57,7 @@ export default function LoginScreen() {
     >
         <View className="items-center gap-3">
           <Image
-            source={require("@/assets/images/chef-hat.png")}
+            source={require("@/assets/images/souskit-mark.png")}
             style={{ width: 80, height: 80 }}
             contentFit="contain"
           />
