@@ -349,6 +349,12 @@ class GroceryManualItemCreate(BaseModel):
     units: str | None = None
 
 
+class GroceryManualItemUpdate(BaseModel):
+    name: str
+    amount: float | None = None
+    units: str | None = None
+
+
 # --- Household ---
 
 
