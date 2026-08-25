@@ -61,6 +61,7 @@ export function generateRecipeCover(body: {
   description?: string | null;
   ingredients?: { name: string }[];
   limit?: number;
+  exclude_keys?: string[];
 }): Promise<RecipeCoverGenerateResponse> {
   return post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", body);
 }

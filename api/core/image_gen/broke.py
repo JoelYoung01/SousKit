@@ -52,9 +52,14 @@ class BrokeImageSearchClient(ImageGenClient):
         *,
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
+        exclude_keys: set[str] | None = None,
     ) -> ImageGenResult | None:
         results = self.generate_candidates(
-            prompt, recipe_title=recipe_title, keywords=keywords, limit=1
+            prompt,
+            recipe_title=recipe_title,
+            keywords=keywords,
+            limit=1,
+            exclude_keys=exclude_keys,
         )
         return results[0] if results else None
 
@@ -65,13 +70,16 @@ class BrokeImageSearchClient(ImageGenClient):
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
         limit: int = 4,
+        exclude_keys: set[str] | None = None,
     ) -> list[ImageGenResult]:
         """Download up to ``limit`` distinct images, title-first."""
         if limit < 1:
             return []
 
+        excluded = {k.strip() for k in (exclude_keys or set()) if k and k.strip()}
         queries = self._query_variants(prompt, recipe_title, keywords)
         seen_urls: set[str] = set()
+        seen_keys: set[str] = set(excluded)
         chosen: list[ImageGenResult] = []
 
         for query in queries:
@@ -84,13 +92,21 @@ class BrokeImageSearchClient(ImageGenClient):
                 url = hit.get("url")
                 if not url or url in seen_urls:
                     continue
+                skip_key = _hit_skip_key(hit)
+                if skip_key and skip_key in seen_keys:
+                    continue
                 seen_urls.add(url)
+                if skip_key:
+                    seen_keys.add(skip_key)
                 try:
                     result = self._download(url, hit)
                 except Exception as exc:  # noqa: BLE001 — try next candidate
                     logger.warning("Broke adapter failed to download %s: %s", url, exc)
                     continue
                 if result is not None:
+                    # Re-check after download in case skip_key resolved differently.
+                    if result.skip_key in excluded:
+                        continue
                     logger.info(
                         "Broke adapter chose image %s/%s for query=%r title=%r "
                         "source=%s",
@@ -104,9 +120,11 @@ class BrokeImageSearchClient(ImageGenClient):
 
         if not chosen:
             logger.info(
-                "Broke adapter found no usable image for prompt=%r title=%r",
+                "Broke adapter found no usable image for prompt=%r title=%r "
+                "(excluded=%s)",
                 prompt,
                 recipe_title,
+                len(excluded),
             )
         return chosen
 
@@ -234,6 +252,7 @@ class BrokeImageSearchClient(ImageGenClient):
 
         ext = _ext_for_mime(content_type, url)
         attribution = hit.get("attribution") or None
+        skip_key = _hit_skip_key(hit)
         return ImageGenResult(
             content=content,
             mime_type=content_type,
@@ -247,8 +266,20 @@ class BrokeImageSearchClient(ImageGenClient):
                 "title": hit.get("title"),
                 "creator": hit.get("creator"),
                 "provider": hit.get("provider"),
+                "skip_key": skip_key,
             },
         )
+
+
+def _hit_skip_key(hit: dict[str, Any]) -> str:
+    """Stable dismiss key for an Openverse search hit (before download)."""
+    ov_id = hit.get("id")
+    if ov_id:
+        return f"ov:{ov_id}"
+    landing = hit.get("foreign_landing_url") or hit.get("url")
+    if landing:
+        return f"url:{landing}"
+    return ""
 
 
 def _ext_for_mime(mime: str, url: str) -> str:
