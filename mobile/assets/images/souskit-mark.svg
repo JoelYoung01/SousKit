@@ -1,49 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <rect width="1024" height="1024" fill="#090b09"/>
 
-  <!-- Knife. The blade sits above y=596 and steps in on both sides to meet the
-       handle: a wide heel on the left, and a 30-unit recess on the right that
-       the fork handle seats into. -->
-  <path fill="#f4f7f5" d="M 368 754
-    L 368 618
-    A 22 22 0 0 0 346 596
-    L 335 596
-    A 22 22 0 0 1 313 574
-    C 313 480 315 316 470 224
-    C 498 208 524 197 538 216
-    C 545 226 546 252 546 296
-    L 546 581
-    A 15 15 0 0 1 531 596
-    A 15 15 0 0 0 516 611
-    L 516 754
-    A 74 74 0 0 1 368 754 Z"/>
+  <!-- Chef's knife. Blade spans y=150..616 (466 tall) and is only 190 wide, so the
+       cutting edge stays near-vertical through the lower half and sweeps right into
+       the tip over the top third. The spine is straight at x=520; at y=590 it steps
+       26 units left into a recess that the fork handle seats into, and the heel steps
+       44 units right into the handle. -->
+  <path fill="#f4f7f5" d="M 374 807
+    L 374 632
+    A 16 16 0 0 0 358 616
+    L 346 616
+    A 16 16 0 0 1 330 600
+    C 330 460 340 280 432 196
+    C 462 158 500 138 514 168
+    C 518 178 520 188 520 202
+    L 520 590
+    A 13 13 0 0 1 507 603
+    A 13 13 0 0 0 494 616
+    L 494 807
+    A 60 60 0 0 1 374 807 Z"/>
 
-  <!-- Fork. Four tines converge into a base that sweeps down into a thinner
-       neck, then a straight handle. The left edge retraces the knife's right
-       edge exactly, so the two shapes share one continuous seam. -->
-  <path fill="#22c55e" d="M 546 349
-    A 14 14 0 0 1 574 349
-    L 574 491
-    A 9 9 0 0 0 592 491
-    L 592 349
-    A 14 14 0 0 1 620 349
-    L 620 491
-    A 9 9 0 0 0 638 491
-    L 638 349
-    A 14 14 0 0 1 666 349
-    L 666 491
-    A 9 9 0 0 0 684 491
-    L 684 349
-    A 14 14 0 0 1 712 349
-    L 712 505
-    C 712 560 636 585 636 640
-    C 636 670 664 670 664 700
-    L 664 754
-    A 74 74 0 0 1 516 754
-    L 516 611
-    A 15 15 0 0 1 531 596
-    A 15 15 0 0 0 546 581 Z"/>
+  <!-- Fork. Four tines (30 wide, 18 apart) top out at y=308, roughly two thirds up
+       the blade. The base sweeps down through a thinner neck into a straight handle
+       whose rounded bottom matches the knife's. The left edge retraces the knife's
+       spine and recess exactly, so the two shapes share one continuous seam. -->
+  <path fill="#22c55e" d="M 520 323
+    A 15 15 0 0 1 550 323
+    L 550 493
+    A 9 9 0 0 0 568 493
+    L 568 323
+    A 15 15 0 0 1 598 323
+    L 598 493
+    A 9 9 0 0 0 616 493
+    L 616 323
+    A 15 15 0 0 1 646 323
+    L 646 493
+    A 9 9 0 0 0 664 493
+    L 664 323
+    A 15 15 0 0 1 694 323
+    L 694 520
+    C 694 582 596 606 596 666
+    C 596 700 614 704 614 736
+    L 614 807
+    A 60 60 0 0 1 494 807
+    L 494 616
+    A 13 13 0 0 1 507 603
+    A 13 13 0 0 0 520 590 Z"/>
 
   <!-- Rivet -->
-  <circle cx="442" cy="758" r="26" fill="#22c55e"/>
+  <circle cx="434" cy="806" r="22" fill="#22c55e"/>
 </svg>
