@@ -33,6 +33,8 @@ class ImageGenClient(ABC):
     """Provider-agnostic cover image client."""
 
     name: str = "abstract"
+    #: True when the provider searches existing photos (user should pick).
+    supports_candidates: bool = False
 
     @abstractmethod
     def generate(
@@ -45,11 +47,28 @@ class ImageGenClient(ABC):
         """Return image bytes for ``prompt``, or None when nothing suitable is found."""
         raise NotImplementedError
 
+    def generate_candidates(
+        self,
+        prompt: str,
+        *,
+        recipe_title: str | None = None,
+        keywords: list[str] | None = None,
+        limit: int = 4,
+    ) -> list[ImageGenResult]:
+        """Return up to ``limit`` distinct images (default: wrap ``generate``)."""
+        if limit < 1:
+            return []
+        image = self.generate(
+            prompt, recipe_title=recipe_title, keywords=keywords
+        )
+        return [image] if image is not None else []
+
 
 class StubImageGenClient(ImageGenClient):
     """No-op provider for offline / deterministic runs."""
 
     name = "stub"
+    supports_candidates = False
 
     def generate(
         self,
@@ -66,11 +85,23 @@ class StubImageGenClient(ImageGenClient):
         )
         return None
 
+    def generate_candidates(
+        self,
+        prompt: str,
+        *,
+        recipe_title: str | None = None,
+        keywords: list[str] | None = None,
+        limit: int = 4,
+    ) -> list[ImageGenResult]:
+        self.generate(prompt, recipe_title=recipe_title, keywords=keywords)
+        return []
+
 
 class QwenImageGenClient(ImageGenClient):
     """Placeholder for Qwen-Image-3.0 via DashScope once a key is available."""
 
     name = "qwen"
+    supports_candidates = False
 
     def __init__(self, api_key: str, model: str, base_url: str):
         self.api_key = api_key

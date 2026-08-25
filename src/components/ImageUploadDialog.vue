@@ -43,12 +43,21 @@ async function processFile(file: File) {
     errorMsg.value = `Image size exceeds ${props.maxSizeMb}MB limit`;
     return;
   }
+  if (!file.size) {
+    errorMsg.value = "That file is empty. Pick a different photo.";
+    return;
+  }
+
+  // Empty filenames make the API treat the part as text, not a file.
+  const safeName = file.name?.trim() || `photo-${Date.now()}.jpg`;
+  const safeFile =
+    safeName === file.name ? file : new File([file], safeName, { type: file.type || "image/jpeg" });
 
   await clearFile();
   uploading.value = true;
   try {
     const payload = new FormData();
-    payload.append("file", file);
+    payload.append("file", safeFile);
     fileDetail.value = await postFile<UploadSlim>(`upload/`, payload);
     model.value = fileDetail.value.id;
   } catch (er) {

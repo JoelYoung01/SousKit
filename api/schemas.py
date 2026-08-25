@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    computed_field,
+    field_validator,
+)
 
 from api.core.recipe_text import normalize_instruction_newlines
 
@@ -84,6 +91,8 @@ class TokenResponse(BaseModel):
 
 
 class UploadFileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     file_path: str
@@ -106,6 +115,22 @@ class RecipeCoverGenerateRequest(BaseModel):
     name: str = Field(min_length=1)
     description: str | None = None
     ingredients: list[RecipeCoverIngredientHint] = Field(default_factory=list)
+    #: How many candidate images to return (search providers may return fewer).
+    limit: int = Field(default=4, ge=1, le=8)
+
+
+class RecipeCoverGenerateResponse(BaseModel):
+    """Cover search/generation result for the recipe edit UI.
+
+    When ``mode`` is ``pick`` (Openverse / broke), the client should show the
+    options and let the user choose. When ``single``, apply ``options[0]``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    provider: str
+    mode: str  # "pick" | "single"
+    options: list[UploadFileResponse]
 
 
 class RecipeSlim(BaseModel):

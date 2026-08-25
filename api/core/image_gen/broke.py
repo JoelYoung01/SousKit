@@ -30,13 +30,14 @@ class BrokeImageSearchClient(ImageGenClient):
     """Search Openverse for free public food images matching a recipe prompt."""
 
     name = "broke"
+    supports_candidates = True
 
     def __init__(
         self,
         *,
         base_url: str = "https://api.openverse.org/v1",
         licenses: str = "cc0,pdm",
-        page_size: int = 12,
+        page_size: int = 20,
         session: requests.Session | None = None,
     ):
         self.base_url = base_url.rstrip("/")
@@ -52,12 +53,34 @@ class BrokeImageSearchClient(ImageGenClient):
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
     ) -> ImageGenResult | None:
+        results = self.generate_candidates(
+            prompt, recipe_title=recipe_title, keywords=keywords, limit=1
+        )
+        return results[0] if results else None
+
+    def generate_candidates(
+        self,
+        prompt: str,
+        *,
+        recipe_title: str | None = None,
+        keywords: list[str] | None = None,
+        limit: int = 4,
+    ) -> list[ImageGenResult]:
+        """Download up to ``limit`` distinct images, title-first."""
+        if limit < 1:
+            return []
+
         queries = self._query_variants(prompt, recipe_title, keywords)
         seen_urls: set[str] = set()
+        chosen: list[ImageGenResult] = []
 
         for query in queries:
+            if len(chosen) >= limit:
+                break
             candidates = self._search(query)
             for hit in candidates:
+                if len(chosen) >= limit:
+                    break
                 url = hit.get("url")
                 if not url or url in seen_urls:
                     continue
@@ -69,19 +92,23 @@ class BrokeImageSearchClient(ImageGenClient):
                     continue
                 if result is not None:
                     logger.info(
-                        "Broke adapter chose image for query=%r title=%r source=%s",
+                        "Broke adapter chose image %s/%s for query=%r title=%r "
+                        "source=%s",
+                        len(chosen) + 1,
+                        limit,
                         query,
                         recipe_title,
                         result.source_url,
                     )
-                    return result
+                    chosen.append(result)
 
-        logger.info(
-            "Broke adapter found no usable image for prompt=%r title=%r",
-            prompt,
-            recipe_title,
-        )
-        return None
+        if not chosen:
+            logger.info(
+                "Broke adapter found no usable image for prompt=%r title=%r",
+                prompt,
+                recipe_title,
+            )
+        return chosen
 
     def _query_variants(
         self,
@@ -89,7 +116,11 @@ class BrokeImageSearchClient(ImageGenClient):
         recipe_title: str | None,
         keywords: list[str] | None,
     ) -> list[str]:
-        """Progressively simpler queries — long phrases often return zero hits."""
+        """Title-led queries first so renaming the dish changes the search.
+
+        Ingredient queries follow as fallbacks — long phrases often return
+        zero hits, so we keep progressive simplifications.
+        """
         variants: list[str] = []
 
         def add(q: str) -> None:
@@ -98,7 +129,29 @@ class BrokeImageSearchClient(ImageGenClient):
                 variants.append(q)
 
         keys = [k.strip().lower() for k in (keywords or []) if k and k.strip()]
-        # Ingredient-led queries first (best match for "what is this dish").
+        title = (recipe_title or "").strip()
+        title_tokens = [
+            t for t in title.lower().replace(",", " ").split() if len(t) > 3
+        ]
+
+        # 1) Full title — strongest signal when the user renames the recipe.
+        if title:
+            add(f"{title} food")
+            add(title)
+            add(f"{title} dinner plated")
+
+        # 2) Dish-form token from the title (tacos, curry, pasta…).
+        if title_tokens:
+            add(f"{title_tokens[-1]} food")
+            if len(title_tokens) >= 2:
+                add(f"{title_tokens[-2]} {title_tokens[-1]} food")
+            if keys:
+                add(f"{keys[0]} {title_tokens[-1]}")
+
+        # 3) Shared prompt (may already be title- or ingredient-led).
+        add(prompt)
+
+        # 4) Ingredient fallbacks when title search is thin.
         if len(keys) >= 2:
             add(f"{keys[0]} {keys[1]} food")
             add(f"{keys[0]} {keys[1]} dinner")
@@ -107,19 +160,6 @@ class BrokeImageSearchClient(ImageGenClient):
             add(f"{keys[0]} food")
         if len(keys) >= 3:
             add(f"{keys[0]} {keys[1]} {keys[2]} food")
-
-        add(prompt)
-        title = (recipe_title or "").strip()
-        if title:
-            add(f"{title} food")
-            # Last title token is often the dish form (tacos, curry, pasta…).
-            title_tokens = [
-                t for t in title.lower().replace(",", " ").split() if len(t) > 3
-            ]
-            if title_tokens:
-                add(f"{title_tokens[-1]} food")
-                if keys:
-                    add(f"{keys[0]} {title_tokens[-1]}")
 
         add("homemade dinner plated food")
         return variants

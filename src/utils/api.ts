@@ -1,6 +1,24 @@
 import { TOKEN_STORAGE_KEY } from "@/stores/session";
 import { parseApiErrorBody } from "./errors";
 
+function networkErrorMessage(error: unknown, context?: string): string {
+  const base = context
+    ? `Couldn’t ${context} — the request never reached the server.`
+    : "Couldn’t reach the server.";
+  const reason =
+    error instanceof TypeError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : null;
+  if (reason && !/network request failed|failed to fetch/i.test(reason)) {
+    return `${base} (${reason})`;
+  }
+  return `${base} Check your connection and try again.`;
+}
+
 export class ApiError extends Error {
   public status: number;
   public ok: boolean;
@@ -33,7 +51,7 @@ async function readErrorBody(response: Response): Promise<unknown> {
   }
 }
 
-export async function doFetch(url: string, options?: RequestInit) {
+export async function doFetch(url: string, options?: RequestInit, meta?: { action?: string }) {
   const access_token = localStorage.getItem(TOKEN_STORAGE_KEY);
   const headers: HeadersInit = {};
   if (access_token) {
@@ -55,8 +73,8 @@ export async function doFetch(url: string, options?: RequestInit) {
   let response: Response;
   try {
     response = await fetch(url, builtOptions);
-  } catch {
-    const networkMessage = "Network error — check your connection and try again.";
+  } catch (er) {
+    const networkMessage = networkErrorMessage(er, meta?.action);
     throw new ApiError(networkMessage, new Response(null, { status: 503 }), {
       userMessage: networkMessage
     });
@@ -78,7 +96,7 @@ export async function doFetch(url: string, options?: RequestInit) {
 }
 
 export async function get<T = any>(url: string): Promise<T> {
-  return doFetch(url);
+  return doFetch(url, undefined, { action: "load that data" });
 }
 
 export async function post<T = any>(
@@ -95,7 +113,7 @@ export async function post<T = any>(
     body: JSON.stringify(body)
   };
 
-  return doFetch(url, options);
+  return doFetch(url, options, { action: "save that" });
 }
 
 export async function put<T = any>(
@@ -112,7 +130,7 @@ export async function put<T = any>(
     body: JSON.stringify(body)
   };
 
-  return doFetch(url, options);
+  return doFetch(url, options, { action: "save that" });
 }
 
 export async function patch<T = any>(
@@ -129,14 +147,14 @@ export async function patch<T = any>(
     body: JSON.stringify(body)
   };
 
-  return doFetch(url, options);
+  return doFetch(url, options, { action: "update that" });
 }
 
 export async function del(url: string): Promise<any> {
   const options = {
     method: "DELETE"
   };
-  return doFetch(url, options);
+  return doFetch(url, options, { action: "delete that" });
 }
 
 export async function postFile<T = any>(url: string, file: FormData): Promise<T> {
@@ -145,5 +163,5 @@ export async function postFile<T = any>(url: string, file: FormData): Promise<T>
     body: file
   };
 
-  return doFetch(url, options);
+  return doFetch(url, options, { action: "upload that photo" });
 }
