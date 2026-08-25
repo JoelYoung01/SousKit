@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { mediaUrl } from "@/lib/media";
+import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
 import { paths } from "@/sitemap";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import type {
   IngredientCreate,
   RecipeCoverGenerateResponse,
+  RecipeCoverOption,
   RecipeCreate,
   RecipeDetail,
   UploadSlim
@@ -39,9 +41,11 @@ const saving = ref(false);
 const loading = ref(false);
 const generatingCover = ref(false);
 const coverError = ref("");
-const coverOptions = ref<UploadSlim[]>([]);
+const coverOptions = ref<RecipeCoverOption[]>([]);
 const coverPickerOpen = ref(false);
 const coverPreviewUrl = ref<string>("");
+const coverSkipKeys = ref<string[]>([]);
+const dismissingCoverId = ref<number | null>(null);
 
 const coverPreviewSrc = computed(() =>
   coverPreviewUrl.value ? mediaUrl(coverPreviewUrl.value) : ""
@@ -74,6 +78,9 @@ watch(
 const ingredientForms = reactive<IngredientForm[]>([]);
 
 const creating = computed(() => route.name === "recipe-new");
+const coverRecipeKey = computed(() =>
+  creating.value ? "new" : String(route.params.recipeId ?? "new")
+);
 const returnUrl = computed(() => {
   const param = Array.isArray(route.query.returnUrl)
     ? route.query.returnUrl.at(-1)
@@ -116,10 +123,12 @@ async function generateCoverImage() {
       ingredients: ingredientForms
         .filter((ing) => ing.name?.trim())
         .map((ing) => ({ name: ing.name!.trim() })),
-      limit: 4
+      limit: 4,
+      exclude_keys: coverSkipKeys.value
     });
     if (!result.options.length) {
-      coverError.value = "No cover photos found. Try a clearer dish name or upload your own.";
+      coverError.value =
+        "No cover photos found. Try a clearer dish name, clear dismissed photos, or upload your own.";
       return;
     }
     if (result.mode === "single" || result.options.length === 1) {
@@ -137,11 +146,45 @@ async function generateCoverImage() {
   }
 }
 
-function applyCoverOption(upload: UploadSlim) {
+function applyCoverOption(upload: RecipeCoverOption | UploadSlim) {
   form.cover_image_id = upload.id;
   coverPreviewUrl.value = upload.url;
   coverPickerOpen.value = false;
   coverOptions.value = [];
+}
+
+async function dismissCoverOption(option: RecipeCoverOption) {
+  if (dismissingCoverId.value) return;
+  dismissingCoverId.value = option.id;
+  try {
+    coverSkipKeys.value = rememberCoverSkipKey(coverRecipeKey.value, option.skip_key);
+    coverOptions.value = coverOptions.value.filter((o) => o.id !== option.id);
+    // Best-effort cleanup of the unused upload.
+    void del(`/upload/${option.id}/`).catch(() => undefined);
+
+    // Refill so the user can keep cycling without leaving the picker.
+    if (coverOptions.value.length < 3 && form.name?.trim()) {
+      const refill = await post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", {
+        name: form.name.trim(),
+        description: form.description?.trim() || null,
+        ingredients: ingredientForms
+          .filter((ing) => ing.name?.trim())
+          .map((ing) => ({ name: ing.name!.trim() })),
+        limit: 1,
+        exclude_keys: [...coverSkipKeys.value, ...coverOptions.value.map((o) => o.skip_key)]
+      });
+      for (const next of refill.options) {
+        if (!coverOptions.value.some((o) => o.id === next.id || o.skip_key === next.skip_key)) {
+          coverOptions.value = [...coverOptions.value, next];
+        }
+      }
+    }
+  } catch (er) {
+    console.error(er);
+    toast.fromError(er, "Couldn’t dismiss that photo.");
+  } finally {
+    dismissingCoverId.value = null;
+  }
 }
 
 async function getRecipeDetails() {
@@ -230,8 +273,13 @@ function removeIngredient(index: number) {
 }
 
 onMounted(() => {
+  coverSkipKeys.value = loadCoverSkipKeys(coverRecipeKey.value);
   if (creating.value && ingredientForms.length === 0) addIngredient();
   getRecipeDetails();
+});
+
+watch(coverRecipeKey, (key) => {
+  coverSkipKeys.value = loadCoverSkipKeys(key);
 });
 </script>
 
@@ -263,7 +311,8 @@ onMounted(() => {
         </div>
         <p class="text-xs text-muted-foreground">
           Generate searches free public-domain food photos from the recipe name and shows a few
-          options to pick from. Enter a name first.
+          options to pick from. Dismiss ones you don’t like — they won’t come back for this recipe.
+          Enter a name first.
         </p>
         <p v-if="coverError" class="text-sm text-destructive">{{ coverError }}</p>
       </div>
@@ -372,8 +421,10 @@ onMounted(() => {
     <CoverImagePickerDialog
       v-model:open="coverPickerOpen"
       :options="coverOptions"
+      :dismissing-id="dismissingCoverId"
       @select="applyCoverOption"
       @search-again="generateCoverImage"
+      @dismiss="dismissCoverOption"
     />
   </div>
 </template>

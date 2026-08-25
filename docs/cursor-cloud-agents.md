@@ -80,7 +80,7 @@ The admin seed also receives `SUPERUSER_GID` when set.
 ## Recipe cover images (generated recipes)
 
 - On wizard **commit**, newly created recipes get a cover via `api/core/image_gen/` (ABC + factory, same pattern as the LLM client).
-- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients, optional `limit` default 4) which returns `{ provider, mode, options: Upload[] }`. Search providers (`broke`) use `mode: "pick"` so the UI shows a chooser; the form binds the chosen option as `cover_image_id`.
+- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients, optional `limit` default 4, optional `exclude_keys`) which returns `{ provider, mode, options: [{ …Upload fields, skip_key }] }`. Search providers (`broke`) use `mode: "pick"` so the UI shows a chooser; the form binds the chosen option as `cover_image_id`. Dismissed options’ `skip_key` values are stored per-recipe in local storage and sent back as `exclude_keys` so Search again / Generate skips them.
 - `IMAGE_GEN_PROVIDER` selects the adapter:
   - `broke` (default) — free Openverse search limited to `cc0,pdm` (public domain); downloads bytes into `UPLOAD_DIR` and returns up to `limit` candidates. Queries are **title-first** so renaming a recipe and regenerating changes results. No API key.
   - `stub` — skip network; leave cover unset (UI shows the default placeholder); generate-cover returns 404 with a clear message.

@@ -1,30 +1,45 @@
-import type { UploadSlim } from "@/types";
+import type { RecipeCoverOption } from "@/types";
 import { mediaSource } from "@/lib/media";
 import { colors } from "@/lib/colors";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { Sheet } from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
 import { Image } from "expo-image";
-import { useState } from "react";
+import { X } from "lucide-react-native";
+import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 /** Bottom sheet: pick one of several searched cover photos. */
 export function CoverImagePickerSheet({
   visible,
   options,
+  dismissingId = null,
   onSelect,
   onClose,
-  onSearchAgain
+  onSearchAgain,
+  onDismiss
 }: {
   visible: boolean;
-  options: UploadSlim[];
-  onSelect: (upload: UploadSlim) => void;
+  options: RecipeCoverOption[];
+  dismissingId?: number | null;
+  onSelect: (upload: RecipeCoverOption) => void;
   onClose: () => void;
   onSearchAgain?: () => void;
+  onDismiss?: (upload: RecipeCoverOption) => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  // Prefer the first option whenever a new result set opens.
+  useEffect(() => {
+    if (!visible) {
+      setSelectedId(null);
+      return;
+    }
+    if (!options.some((o) => o.id === selectedId)) {
+      setSelectedId(options[0]?.id ?? null);
+    }
+  }, [visible, options, selectedId]);
+
   const activeId = selectedId ?? options[0]?.id ?? null;
 
   const confirm = () => {
@@ -36,35 +51,62 @@ export function CoverImagePickerSheet({
     <Sheet visible={visible} onClose={onClose} className="px-4 pb-2 pt-1">
       <Text className="font-sans-semibold text-lg">Choose a cover photo</Text>
       <Text className="mt-1 text-sm leading-5 text-muted-foreground">
-        Free public-domain food photos matched to this recipe. Tap one to use it.
+        Tap one to use it. Dismiss photos you don’t want — Search again won’t show them for this
+        recipe.
       </Text>
 
       <View className="mt-4 flex-row flex-wrap gap-2">
         {options.map((option) => {
           const selected = activeId === option.id;
+          const dismissing = dismissingId === option.id;
           return (
-            <Pressable
+            <View
               key={option.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel="Cover photo option"
-              onPress={() => setSelectedId(option.id)}
-              className="overflow-hidden rounded-xl border-2"
+              className="relative overflow-hidden rounded-xl border-2"
               style={{
                 width: "48%",
                 flexGrow: 1,
                 borderColor: selected ? colors.green500 : colors.border
               }}
             >
-              <Image
-                source={mediaSource(option.url)}
-                style={{ width: "100%", height: 112 }}
-                contentFit="cover"
-              />
-            </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel="Cover photo option"
+                onPress={() => setSelectedId(option.id)}
+              >
+                <Image
+                  source={mediaSource(option.url)}
+                  style={{ width: "100%", height: 112 }}
+                  contentFit="cover"
+                />
+              </Pressable>
+              {onDismiss ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss this photo"
+                  disabled={dismissing}
+                  onPress={() => onDismiss(option)}
+                  className="absolute right-1.5 top-1.5 h-7 w-7 items-center justify-center rounded-full border border-border bg-card"
+                  style={{ opacity: dismissing ? 0.6 : 1 }}
+                >
+                  {dismissing ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <X size={14} color={colors.foreground} />
+                  )}
+                </Pressable>
+              ) : null}
+            </View>
           );
         })}
       </View>
+
+      {!options.length ? (
+        <Text className="mt-3 text-sm text-muted-foreground">
+          No options left — try Search again for more photos.
+        </Text>
+      ) : null}
 
       <View className="mt-4 gap-2 pb-2">
         <Button disabled={!activeId} onPress={confirm}>

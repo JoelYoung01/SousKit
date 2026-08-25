@@ -117,6 +117,24 @@ class RecipeCoverGenerateRequest(BaseModel):
     ingredients: list[RecipeCoverIngredientHint] = Field(default_factory=list)
     #: How many candidate images to return (search providers may return fewer).
     limit: int = Field(default=4, ge=1, le=8)
+    #: Skip keys the user dismissed for this recipe (Openverse id / source url).
+    exclude_keys: list[str] = Field(default_factory=list, max_length=200)
+
+
+class RecipeCoverOption(BaseModel):
+    """One cover candidate, including a dismiss key for later searches."""
+
+    id: int
+    name: str
+    file_path: str
+    created_on: datetime
+    created_by_id: int
+    skip_key: str
+
+    @computed_field
+    @property
+    def url(self) -> str:
+        return f"/uploads/{self.file_path}"
 
 
 class RecipeCoverGenerateResponse(BaseModel):
@@ -126,11 +144,9 @@ class RecipeCoverGenerateResponse(BaseModel):
     options and let the user choose. When ``single``, apply ``options[0]``.
     """
 
-    model_config = ConfigDict(from_attributes=True)
-
     provider: str
     mode: str  # "pick" | "single"
-    options: list[UploadFileResponse]
+    options: list[RecipeCoverOption]
 
 
 class RecipeSlim(BaseModel):

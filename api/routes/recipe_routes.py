@@ -160,6 +160,7 @@ def generate_recipe_cover(
         description=body.description,
         ingredients=ingredients,
         limit=body.limit,
+        exclude_keys={k.strip() for k in body.exclude_keys if k and k.strip()},
     )
     if not uploads:
         if provider == "stub":
@@ -171,13 +172,23 @@ def generate_recipe_cover(
         else:
             detail = (
                 "Couldn’t find suitable cover images for that recipe. "
-                "Try a clearer dish name, or upload your own photo."
+                "Try a clearer dish name, dismiss fewer photos, or upload your own."
             )
         raise HTTPException(status_code=404, detail=detail)
     return {
         "provider": provider,
         "mode": mode,
-        "options": uploads,
+        "options": [
+            {
+                "id": opt.upload.id,
+                "name": opt.upload.name,
+                "file_path": opt.upload.file_path,
+                "created_on": opt.upload.created_on,
+                "created_by_id": opt.upload.created_by_id,
+                "skip_key": opt.skip_key,
+            }
+            for opt in uploads
+        ],
     }
 
 

@@ -28,6 +28,24 @@ class ImageGenResult:
     source_url: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def skip_key(self) -> str:
+        """Stable id so clients can dismiss this image on later searches."""
+        meta = self.metadata or {}
+        cached = meta.get("skip_key")
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+        ov = meta.get("openverse_id")
+        if ov:
+            return f"ov:{ov}"
+        if self.source_url:
+            return f"url:{self.source_url}"
+        # Last resort: content fingerprint (not ideal across regenerations).
+        import hashlib
+
+        digest = hashlib.sha256(self.content[:8192]).hexdigest()[:20]
+        return f"hash:{digest}"
+
 
 class ImageGenClient(ABC):
     """Provider-agnostic cover image client."""
@@ -43,6 +61,7 @@ class ImageGenClient(ABC):
         *,
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
+        exclude_keys: set[str] | None = None,
     ) -> ImageGenResult | None:
         """Return image bytes for ``prompt``, or None when nothing suitable is found."""
         raise NotImplementedError
@@ -54,12 +73,16 @@ class ImageGenClient(ABC):
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
         limit: int = 4,
+        exclude_keys: set[str] | None = None,
     ) -> list[ImageGenResult]:
         """Return up to ``limit`` distinct images (default: wrap ``generate``)."""
         if limit < 1:
             return []
         image = self.generate(
-            prompt, recipe_title=recipe_title, keywords=keywords
+            prompt,
+            recipe_title=recipe_title,
+            keywords=keywords,
+            exclude_keys=exclude_keys,
         )
         return [image] if image is not None else []
 
@@ -76,6 +99,7 @@ class StubImageGenClient(ImageGenClient):
         *,
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
+        exclude_keys: set[str] | None = None,
     ) -> ImageGenResult | None:
         logger.info(
             "Stub image gen skipped for prompt=%r title=%r keywords=%r",
@@ -92,8 +116,14 @@ class StubImageGenClient(ImageGenClient):
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
         limit: int = 4,
+        exclude_keys: set[str] | None = None,
     ) -> list[ImageGenResult]:
-        self.generate(prompt, recipe_title=recipe_title, keywords=keywords)
+        self.generate(
+            prompt,
+            recipe_title=recipe_title,
+            keywords=keywords,
+            exclude_keys=exclude_keys,
+        )
         return []
 
 
@@ -114,6 +144,7 @@ class QwenImageGenClient(ImageGenClient):
         *,
         recipe_title: str | None = None,
         keywords: list[str] | None = None,
+        exclude_keys: set[str] | None = None,
     ) -> ImageGenResult | None:
         raise NotImplementedError(
             "Qwen image client is not wired yet. Set IMAGE_GEN_PROVIDER=broke "
