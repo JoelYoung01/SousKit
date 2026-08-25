@@ -2,11 +2,12 @@
 import SwipeRow from "@/components/SwipeRow.vue";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { paths } from "@/sitemap";
 import { useGroceryStore } from "@/stores/grocery";
 import type { GroceryItem } from "@/types";
-import { Eye, EyeOff, ShoppingCart, Trash2 } from "@lucide/vue";
+import { Eye, EyeOff, Plus, ShoppingCart, Trash2 } from "@lucide/vue";
 import { computed, onActivated, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -19,6 +20,8 @@ const router = useRouter();
 const groceryStore = useGroceryStore();
 
 const showDismissed = ref(false);
+const newItemName = ref("");
+const addingItem = ref(false);
 /** Keys waiting out the undo window before a real dismiss is persisted. */
 const pendingHideKeys = ref<Set<string>>(new Set());
 const hideTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -98,13 +101,27 @@ function onRowTap(item: GroceryItem) {
     return;
   }
   if (item.dismissed) {
-    void groceryStore.setStatus(item, null);
+    void groceryStore.setStatus(item, item.auto_dismissed ? "restored" : null);
     return;
   }
   queueHide(item);
 }
 
-async function load(force = false) {
+async function onAddItem() {
+  const name = newItemName.value.trim();
+  if (!name || addingItem.value) return;
+  addingItem.value = true;
+  try {
+    await groceryStore.addManualItem({ name });
+    newItemName.value = "";
+  } catch {
+    /* store toasts */
+  } finally {
+    addingItem.value = false;
+  }
+}
+
+async function load(force = true) {
   try {
     await groceryStore.ensureLoaded({ force });
   } catch {
@@ -114,6 +131,10 @@ async function load(force = false) {
 
 function onDelete(item: GroceryItem) {
   clearPending(item.key);
+  if (item.is_manual && item.recipes.length === 0 && item.manual_item_ids.length > 0) {
+    void groceryStore.deleteManualItem(item.manual_item_ids[0]);
+    return;
+  }
   void groceryStore.setStatus(item, "deleted");
 }
 
@@ -155,6 +176,20 @@ onUnmounted(() => {
         {{ showDismissed ? "Hide dismissed" : "Show dismissed" }}
       </Button>
     </div>
+
+    <form class="mt-4 flex gap-2" @submit.prevent="onAddItem">
+      <Input
+        v-model="newItemName"
+        class="bg-card"
+        placeholder="Add an item…"
+        autocomplete="off"
+        :disabled="addingItem"
+      />
+      <Button type="submit" size="icon" class="shrink-0" :disabled="!newItemName.trim() || addingItem">
+        <Plus class="size-4" />
+        <span class="sr-only">Add item</span>
+      </Button>
+    </form>
 
     <p
       v-if="!showSkeleton && dismissedCount > 0 && !showDismissed"
@@ -248,6 +283,7 @@ onUnmounted(() => {
                 class="flex flex-1 items-center justify-center bg-[#3f463f] text-foreground transition-opacity active:opacity-80"
                 :tabindex="open ? 0 : -1"
                 aria-label="View recipe"
+                :disabled="item.recipes.length === 0"
                 @click.stop="
                   close();
                   onViewRecipe(item);

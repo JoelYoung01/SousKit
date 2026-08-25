@@ -278,6 +278,9 @@ class GroceryItem(BaseModel):
     recipes: list[GroceryRecipeRef]
     recipe_titles: str
     source_ingredient_ids: list[int]
+    manual_item_ids: list[int] = []
+    is_manual: bool = False
+    auto_dismissed: bool = False
     dismissed: bool = False
     deleted: bool = False
 
@@ -296,7 +299,13 @@ class GrocerySummaryResponse(BaseModel):
 
 class GroceryItemStateUpdate(BaseModel):
     item_key: str
-    status: str | None = None  # "dismissed" | "deleted" | null to clear
+    status: str | None = None  # "dismissed" | "deleted" | "restored" | null to clear
+
+
+class GroceryManualItemCreate(BaseModel):
+    name: str
+    amount: float | None = None
+    units: str | None = None
 
 
 # --- Household ---

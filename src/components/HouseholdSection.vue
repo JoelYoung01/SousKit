@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { extractInviteToken, inviteLabel } from "@/lib/household-invite";
+import { useGroceryStore } from "@/stores/grocery";
 import { useSessionStore } from "@/stores/session";
 import type { Household, HouseholdInvite, PendingHouseholdInvite } from "@/types";
 import {
@@ -28,6 +29,7 @@ import QRCode from "qrcode";
 import { computed, onMounted, ref, watch } from "vue";
 
 const sessionStore = useSessionStore();
+const groceryStore = useGroceryStore();
 const household = ref<Household | null>(null);
 const pendingInvites = ref<PendingHouseholdInvite[]>([]);
 const loading = ref(true);
@@ -137,6 +139,7 @@ async function onLeave() {
   busy.value = true;
   try {
     household.value = await leaveHousehold();
+    groceryStore.invalidate();
     toast.success("You left the household.");
   } catch (error) {
     toast.fromError(error, "Couldn’t leave the household.");
@@ -164,6 +167,7 @@ async function onAccept(token: string) {
   try {
     household.value = await acceptHouseholdInvite(token);
     pendingInvites.value = await fetchPendingHouseholdInvites();
+    groceryStore.invalidate();
     toast.success("Joined household. Recipes and plans are shared now.");
   } catch (error) {
     toast.fromError(error, "Couldn’t accept that invite.");

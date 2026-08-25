@@ -1,13 +1,28 @@
-import { fetchGroceryList, fetchGrocerySummary, setGroceryItemStatus } from "@/api/grocery";
+import {
+  createManualGroceryItem,
+  deleteManualGroceryItem,
+  fetchGroceryList,
+  fetchGrocerySummary,
+  setGroceryItemStatus
+} from "@/api/grocery";
 import { queryClient } from "@/lib/query-client";
 import { toast } from "@/stores/toast";
-import type { GroceryItem, GroceryItemStatus, GroceryListResponse } from "@/types";
+import type {
+  GroceryItem,
+  GroceryItemStatus,
+  GroceryListResponse,
+  GroceryManualItemCreate
+} from "@/types";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 const LIST_KEY = ["grocery", "list"] as const;
 
 export function useGroceryList() {
-  return useQuery({ queryKey: LIST_KEY, queryFn: fetchGroceryList });
+  return useQuery({
+    queryKey: LIST_KEY,
+    queryFn: fetchGroceryList,
+    refetchOnMount: "always"
+  });
 }
 
 export function useGrocerySummary() {
@@ -43,7 +58,31 @@ export function useSetGroceryStatus() {
       toast.fromError(error, "Could not update the item.");
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["grocery", "summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["grocery"] });
+    }
+  });
+}
+
+export function useCreateManualGroceryItem() {
+  return useMutation({
+    mutationFn: (body: GroceryManualItemCreate) => createManualGroceryItem(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["grocery"] });
+    },
+    onError: (error) => {
+      toast.fromError(error, "Could not add that item.");
+    }
+  });
+}
+
+export function useDeleteManualGroceryItem() {
+  return useMutation({
+    mutationFn: (itemId: number) => deleteManualGroceryItem(itemId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["grocery"] });
+    },
+    onError: (error) => {
+      toast.fromError(error, "Could not remove that item.");
     }
   });
 }

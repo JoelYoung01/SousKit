@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
-from api.models import Ingredient, PlannedRecipe
+from api.models import GroceryManualItem, Ingredient, PlannedRecipe
 
 CATEGORY_ORDER = [
     "Produce",
@@ -195,8 +195,18 @@ def format_quantity(amount: float | None, units: str | None) -> str | None:
     return None
 
 
-def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
-    """Collapse ingredients across planned recipes by normalized name."""
+def aggregate_grocery_items(
+    planned: list[PlannedRecipe],
+    manual_items: list[GroceryManualItem] | None = None,
+) -> list[dict]:
+    """Collapse ingredients across planned recipes and optional manual items."""
+    buckets = _build_planned_buckets(planned)
+    if manual_items:
+        merge_manual_grocery_items(buckets, manual_items)
+    return _finalize_buckets(buckets)
+
+
+def _build_planned_buckets(planned: list[PlannedRecipe]) -> dict[str, dict]:
     buckets: dict[str, dict] = {}
 
     for plan in planned:
@@ -220,8 +230,14 @@ def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
                     "unit_order": [],
                     "recipes": {},
                     "source_ingredient_ids": [],
+                    "latest_planned_for": plan.planned_for,
+                    "manual_item_ids": [],
+                    "is_manual": False,
                 }
                 buckets[key] = bucket
+            else:
+                if plan.planned_for > bucket["latest_planned_for"]:
+                    bucket["latest_planned_for"] = plan.planned_for
 
             unit_key = (ingredient.units or "").strip().lower()
             display_unit = (ingredient.units or "").strip() or None
@@ -243,6 +259,53 @@ def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
                 bucket["recipes"][recipe.id] = recipe.name
             bucket["source_ingredient_ids"].append(ingredient.id)
 
+    return buckets
+
+
+def merge_manual_grocery_items(
+    buckets: dict[str, dict], manual_items: list[GroceryManualItem]
+) -> None:
+    """Fold ad-hoc household items into aggregated buckets."""
+    for manual in manual_items:
+        key = manual.item_key
+        bucket = buckets.get(key)
+        if bucket is None:
+            bucket = {
+                "key": key,
+                "name": manual.name.strip(),
+                "category": infer_category(manual.name),
+                "by_unit": {},
+                "unit_order": [],
+                "recipes": {},
+                "source_ingredient_ids": [],
+                "latest_planned_for": None,
+                "manual_item_ids": [],
+                "is_manual": True,
+            }
+            buckets[key] = bucket
+
+        bucket["manual_item_ids"].append(manual.id)
+        if not bucket["recipes"]:
+            bucket["is_manual"] = True
+
+        unit_key = (manual.units or "").strip().lower()
+        display_unit = (manual.units or "").strip() or None
+        if unit_key not in bucket["by_unit"]:
+            bucket["unit_order"].append(unit_key)
+            bucket["by_unit"][unit_key] = {
+                "total": 0.0,
+                "saw_amount": False,
+                "display_unit": display_unit,
+            }
+        entry = bucket["by_unit"][unit_key]
+        if entry["display_unit"] is None and display_unit:
+            entry["display_unit"] = display_unit
+        if manual.amount is not None:
+            entry["total"] += float(manual.amount)
+            entry["saw_amount"] = True
+
+
+def _finalize_buckets(buckets: dict[str, dict]) -> list[dict]:
     items: list[dict] = []
     for bucket in buckets.values():
         quantities: list[dict] = []
@@ -263,6 +326,11 @@ def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
                 bucket["recipes"].items(), key=lambda x: x[1].lower()
             )
         ]
+        recipe_titles = (
+            ", ".join(r["name"] for r in recipes)
+            if recipes
+            else ("Added manually" if bucket["is_manual"] else "")
+        )
         items.append(
             {
                 "key": bucket["key"],
@@ -271,8 +339,11 @@ def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
                 "quantities": quantities,
                 "quantity_display": ", ".join(quantity_parts),
                 "recipes": recipes,
-                "recipe_titles": ", ".join(r["name"] for r in recipes),
+                "recipe_titles": recipe_titles,
                 "source_ingredient_ids": bucket["source_ingredient_ids"],
+                "latest_planned_for": bucket["latest_planned_for"],
+                "manual_item_ids": bucket["manual_item_ids"],
+                "is_manual": bucket["is_manual"],
             }
         )
 
@@ -285,6 +356,14 @@ def aggregate_grocery_items(planned: list[PlannedRecipe]) -> list[dict]:
 
     items.sort(key=sort_key)
     return items
+
+
+def should_auto_dismiss(latest_planned_for: datetime | None, today: date) -> bool:
+    """Dismiss recipe-derived items one full day after their last planned meal."""
+    if latest_planned_for is None:
+        return False
+    planned_day = latest_planned_for.date()
+    return today > planned_day + timedelta(days=1)
 
 
 def window_bounds(now: datetime) -> tuple[datetime, datetime]:

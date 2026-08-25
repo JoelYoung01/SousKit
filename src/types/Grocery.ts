@@ -17,8 +17,17 @@ export interface GroceryItem {
   recipes: GroceryRecipeRef[];
   recipe_titles: string;
   source_ingredient_ids: number[];
+  manual_item_ids: number[];
+  is_manual: boolean;
+  auto_dismissed: boolean;
   dismissed: boolean;
   deleted: boolean;
+}
+
+export interface GroceryManualItemCreate {
+  name: string;
+  amount?: number | null;
+  units?: string | null;
 }
 
 export interface GroceryListResponse {
