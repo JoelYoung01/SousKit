@@ -26,45 +26,49 @@ def recipe_image_keywords(
     title: str,
     ingredients: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    """Concrete food nouns for search ranking (ingredients first, then title words)."""
+    """Concrete food nouns for search ranking (title words first, then ingredients)."""
     names: list[str] = []
+    stop = {
+        "with",
+        "and",
+        "the",
+        "over",
+        "a",
+        "in",
+        "of",
+        "for",
+        "sheet-pan",
+        "sheet",
+        "pan",
+        "one-skillet",
+        "skillet",
+        "weeknight",
+        "stubbed",
+        "bowl",
+        "style",
+        "easy",
+        "best",
+        "homemade",
+        "simple",
+        "quick",
+    }
+    for token in (title or "").lower().replace(",", " ").split():
+        token = token.strip("-")
+        if len(token) < 4 or token in stop or token in names:
+            continue
+        names.append(token)
+        if len(names) >= 3:
+            break
+
     for ing in ingredients or []:
         name = str(ing.get("name") or "").strip().lower()
         if not name or name in _SKIP_INGREDIENTS:
             continue
         if name not in names:
             names.append(name)
-        if len(names) >= 4:
+        if len(names) >= 5:
             break
 
-    # Pull a couple of content words from the title if ingredients are sparse.
-    if len(names) < 2:
-        stop = {
-            "with",
-            "and",
-            "the",
-            "over",
-            "a",
-            "in",
-            "of",
-            "for",
-            "sheet-pan",
-            "sheet",
-            "pan",
-            "one-skillet",
-            "skillet",
-            "weeknight",
-            "stubbed",
-            "bowl",
-            "style",
-        }
-        for token in (title or "").lower().replace(",", " ").split():
-            token = token.strip("-")
-            if len(token) < 4 or token in stop or token in names:
-                continue
-            names.append(token)
-            if len(names) >= 4:
-                break
     return names
 
 
@@ -76,17 +80,16 @@ def build_recipe_image_prompt(
     """Build a short food-photo query from recipe fields.
 
     Used as a diffusion prompt later, and as an Openverse search query for the
-    broke adapter. Keep it concrete and food-focused.
+    broke adapter. Prefer the dish title so renaming the recipe changes results.
     """
-    keywords = recipe_image_keywords(title, ingredients)
     clean_title = (title or "").strip()
-
-    # Prefer a compact ingredient-led query — Openverse hates long phrases.
-    if keywords:
-        return f"{' '.join(keywords[:3])} dinner plated food"
+    keywords = recipe_image_keywords(title, ingredients)
 
     if clean_title:
         return f"{clean_title} dinner plated food"
+
+    if keywords:
+        return f"{' '.join(keywords[:3])} dinner plated food"
 
     desc = (description or "").strip()
     if desc:

@@ -4,8 +4,8 @@ import type {
   IngredientSlim,
   RecipeCard,
   RecipeCreate,
-  RecipeDetail,
-  UploadSlim
+  RecipeCoverGenerateResponse,
+  RecipeDetail
 } from "@/types";
 import { del, get, post, put } from "./client";
 
@@ -55,13 +55,15 @@ export function deleteRecipe(recipeId: number | string): Promise<void> {
   return del(`/recipe/${recipeId}/`);
 }
 
-/** Find a free public-domain cover photo for a recipe (server-side search). */
+/** Find free public-domain cover photos for a recipe (server-side search). */
 export function generateRecipeCover(body: {
   name: string;
   description?: string | null;
   ingredients?: { name: string }[];
-}): Promise<UploadSlim> {
-  return post<UploadSlim>("/recipe/generate-cover/", body);
+  limit?: number;
+  exclude_keys?: string[];
+}): Promise<RecipeCoverGenerateResponse> {
+  return post<RecipeCoverGenerateResponse>("/recipe/generate-cover/", body);
 }
 
 export function createIngredient(body: IngredientCreate): Promise<IngredientSlim> {

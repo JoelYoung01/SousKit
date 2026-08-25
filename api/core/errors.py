@@ -83,15 +83,40 @@ def _code_from_detail(detail: Any) -> str | None:
     return None
 
 
+def _json_safe(value: Any) -> Any:
+    """Make validation / error payloads JSON-serializable.
+
+    Pydantic v2 puts raw exception objects in ``ctx.error``; dumping those
+    into ``JSONResponse`` raises ``TypeError`` and aborts the ASGI response,
+    which clients often surface as a generic "network error".
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, BaseException):
+        return f"{type(value).__name__}: {value}"
+    try:
+        # datetime, Path, Enum, etc.
+        return str(value)
+    except Exception:  # noqa: BLE001
+        return repr(value)
+
+
 def error_body(status_code: int, detail: Any = None) -> dict[str, Any]:
     """Build the standardized error JSON body."""
+    safe_detail = (
+        _json_safe(detail)
+        if detail is not None
+        else DEFAULT_USER_MESSAGES.get(status_code)
+    )
     body: dict[str, Any] = {
-        "user_message": _message_from_detail(detail, status_code),
-        "detail": (
-            detail if detail is not None else DEFAULT_USER_MESSAGES.get(status_code)
-        ),
+        "user_message": _message_from_detail(safe_detail, status_code),
+        "detail": safe_detail,
     }
-    code = _code_from_detail(detail)
+    code = _code_from_detail(safe_detail)
     if code:
         body["code"] = code
     return body
@@ -128,7 +153,25 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_: Request, exc: RequestValidationError):
-        return error_response(422, exc.errors())
+        errors = _json_safe(exc.errors())
+        # Empty multipart filenames are parsed as plain form strings — rewrite
+        # the cryptic Pydantic message into something actionable.
+        if isinstance(errors, list):
+            for item in errors:
+                if not isinstance(item, dict):
+                    continue
+                loc = item.get("loc") or []
+                msg = str(item.get("msg") or "")
+                if (
+                    "file" in loc
+                    and "Expected UploadFile" in msg
+                    and "str" in msg
+                ):
+                    item["msg"] = (
+                        "Upload must include a file with a filename "
+                        "(the photo may be missing or corrupted)."
+                    )
+        return error_response(422, errors)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(_: Request, exc: Exception):
