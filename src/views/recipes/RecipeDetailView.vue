@@ -11,6 +11,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { splitInstructionSteps } from "@/lib/instructions";
 import { formatPrepTime, mediaUrl } from "@/lib/media";
+import { recipeToMarkdown } from "@/lib/recipeMarkdown";
 import { useSessionStore } from "@/stores/session";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import { paths } from "@/sitemap";
@@ -22,7 +23,7 @@ import {
 } from "@/utils/ingredients";
 import { ApiError, del, get, post, toast } from "@/utils";
 import { fetchHousehold } from "@/utils/household";
-import { ArrowLeft, LoaderCircle, Pencil, Sparkles } from "@lucide/vue";
+import { ArrowLeft, Copy, LoaderCircle, Pencil, Sparkles } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 
@@ -35,6 +36,7 @@ const deleteOpen = ref(false);
 const aiEditOpen = ref(false);
 const aiInstruction = ref("");
 const aiSaving = ref(false);
+const copying = ref(false);
 const loading = ref(false);
 const householdId = ref<number | null>(null);
 
@@ -85,6 +87,19 @@ async function getRecipeDetails() {
     }
   }
   loading.value = false;
+}
+
+async function copyRecipe() {
+  if (!recipe.value || copying.value) return;
+  copying.value = true;
+  try {
+    await navigator.clipboard.writeText(recipeToMarkdown(recipe.value));
+    toast.success("Recipe copied to clipboard.");
+  } catch (er) {
+    console.error(er);
+    toast.fromError(er, "Couldn’t copy this recipe.");
+  }
+  copying.value = false;
 }
 
 async function deleteRecipe() {
@@ -253,9 +268,15 @@ onMounted(async () => {
         >
       </section>
 
-      <Button v-if="owned" variant="destructive" size="sm" class="mt-8" @click="deleteOpen = true">
-        Delete recipe
-      </Button>
+      <div class="mt-8 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" :disabled="copying" @click="copyRecipe">
+          <Copy class="size-4" />
+          {{ copying ? "Copying…" : "Copy recipe" }}
+        </Button>
+        <Button v-if="owned" variant="destructive" size="sm" @click="deleteOpen = true">
+          Delete recipe
+        </Button>
+      </div>
     </div>
 
     <Dialog v-model:open="deleteOpen">

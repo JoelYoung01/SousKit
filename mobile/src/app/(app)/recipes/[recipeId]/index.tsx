@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
 import { colors } from "@/lib/colors";
 import { formatPrepTime } from "@/lib/dates";
+import { recipeToMarkdown } from "@/lib/recipeMarkdown";
 import { tapHaptic } from "@/lib/haptics";
 import {
   formatIngredientAmountUnits,
@@ -23,9 +24,10 @@ import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Pencil, Sparkles } from "lucide-react-native";
+import * as Clipboard from "expo-clipboard";
+import { ArrowLeft, Copy, Pencil, Sparkles } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function RecipeDetailScreen() {
@@ -43,6 +45,7 @@ export default function RecipeDetailScreen() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [aiEditOpen, setAiEditOpen] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
@@ -51,6 +54,19 @@ export default function RecipeDetailScreen() {
   const goBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/recipes");
+  };
+
+  const onCopy = async () => {
+    if (!recipe || copying) return;
+    setCopying(true);
+    try {
+      await Clipboard.setStringAsync(recipeToMarkdown(recipe));
+      toast.success("Recipe copied to clipboard.");
+    } catch (er) {
+      toast.fromError(er, "Couldn’t copy this recipe.");
+    } finally {
+      setCopying(false);
+    }
   };
 
   const onDelete = async () => {
@@ -249,16 +265,21 @@ export default function RecipeDetailScreen() {
                 </View>
               ) : null}
 
-              {canEdit ? (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="mt-8 self-start"
-                  onPress={() => setDeleteOpen(true)}
-                >
-                  Delete recipe
+              <View className="mt-8 flex-row flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={copying} onPress={onCopy}>
+                  {copying ? (
+                    <ActivityIndicator size="small" color={colors.foreground} />
+                  ) : (
+                    <Copy size={16} color={colors.foreground} />
+                  )}
+                  {copying ? "Copying…" : "Copy recipe"}
                 </Button>
-              ) : null}
+                {canEdit ? (
+                  <Button variant="destructive" size="sm" onPress={() => setDeleteOpen(true)}>
+                    Delete recipe
+                  </Button>
+                ) : null}
+              </View>
             </>
           ) : (
             <View className="gap-3">
