@@ -167,7 +167,13 @@ def generate_recipe_cover(
             detail = (
                 "Cover image search isn’t enabled on this server. "
                 "Upload your own photo, or ask an admin to set "
-                "IMAGE_GEN_PROVIDER=broke."
+                "IMAGE_GEN_PROVIDER=broke or IMAGE_GEN_PROVIDER=openrouter."
+            )
+        elif provider == "openrouter":
+            detail = (
+                "Couldn’t generate a cover image for that recipe. "
+                "Check that OPENROUTER_API_KEY is set and has credits, "
+                "or upload your own photo."
             )
         else:
             detail = (

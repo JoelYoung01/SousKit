@@ -67,9 +67,15 @@ SUPERUSER_GID=
 # OPENROUTER_MODEL=inception/mercury-2
 # OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
 # OPENROUTER_EMBEDDING_DIMENSIONS=384
+# OpenRouter Image API (when IMAGE_GEN_PROVIDER=openrouter). Reuses OPENROUTER_API_KEY.
+# Default model Seedream 4.5: strong food photos, ~$0.04/image at 2K, supports n>1.
+# OPENROUTER_IMAGE_MODEL=bytedance-seed/seedream-4.5
+# OPENROUTER_IMAGE_RESOLUTION=2K
+# OPENROUTER_IMAGE_ASPECT_RATIO=1:1
+# OPENROUTER_IMAGE_BASE_URL=https://openrouter.ai/api/v1/images
 
 # Cover images for newly generated recipes (meal-plan wizard commit).
-# Providers: stub | broke (default, free Openverse CC0/PDM search) | qwen
+# Providers: stub | broke (default, free Openverse CC0/PDM search) | openrouter | qwen
 # IMAGE_GEN_PROVIDER=broke
 # OPENVERSE_BASE_URL=https://api.openverse.org/v1
 # OPENVERSE_LICENSES=cc0,pdm
