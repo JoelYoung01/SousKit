@@ -15,7 +15,7 @@ jobs:
 
   DeployApp:
     needs: BuildApp
-    uses: JoelYoung01/Templates/.github/workflows/DeployWebhook.yaml@v0.1.2
+    uses: JoelYoung01/References/.github/workflows/DeployWebhook.yaml@v0.1.2
     with:
       app_name: RecipeDB
     secrets:
