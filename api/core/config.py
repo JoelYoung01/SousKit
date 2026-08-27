@@ -118,11 +118,19 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "inception/mercury-2"
     OPENROUTER_EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
     OPENROUTER_EMBEDDING_DIMENSIONS: int = 384
+    # OpenRouter Image API (when IMAGE_GEN_PROVIDER=openrouter).
+    # Seedream 4.5 balances photoreal food quality with multi-image support;
+    # requires 2K+ output (1K is rejected). ~$0.04–0.05/image at 2K.
+    OPENROUTER_IMAGE_MODEL: str = "bytedance-seed/seedream-4.5"
+    OPENROUTER_IMAGE_RESOLUTION: str = "2K"
+    OPENROUTER_IMAGE_ASPECT_RATIO: str = "1:1"
+    OPENROUTER_IMAGE_BASE_URL: str = "https://openrouter.ai/api/v1/images"
 
     # Cover-image provider for newly generated recipes.
-    #   stub  — no network; leave cover unset
-    #   broke — free CC0/public-domain search via Openverse (default)
-    #   qwen  — DashScope Qwen-Image (requires DASHSCOPE_API_KEY; not wired yet)
+    #   stub       — no network; leave cover unset
+    #   broke      — free CC0/public-domain search via Openverse (default)
+    #   openrouter — AI generation via OpenRouter (OPENROUTER_API_KEY)
+    #   qwen       — DashScope Qwen-Image (requires DASHSCOPE_API_KEY; not wired yet)
     IMAGE_GEN_PROVIDER: str = "broke"
     OPENVERSE_BASE_URL: str = "https://api.openverse.org/v1"
     OPENVERSE_LICENSES: str = "cc0,pdm"

@@ -96,3 +96,27 @@ def build_recipe_image_prompt(
         return f"{desc.split('.')[0].strip()[:80]} food"
 
     return "homemade dinner plated food"
+
+
+def build_recipe_diffusion_prompt(
+    title: str,
+    description: str | None = None,
+    ingredients: list[dict[str, Any]] | None = None,
+) -> str:
+    """Prompt tuned for text-to-image models (OpenRouter, DashScope, etc.)."""
+    clean_title = (title or "").strip()
+    keywords = recipe_image_keywords(title, ingredients)
+    dish = clean_title or " ".join(keywords[:3]) or "homemade dinner"
+
+    desc_hint = ""
+    if description:
+        first = description.strip().split(".")[0].strip()
+        if first and first.lower() not in dish.lower():
+            desc_hint = f", {first[:80]}"
+
+    return (
+        f"Professional appetizing food photography of {dish}{desc_hint}. "
+        "Beautifully plated on a ceramic dish, natural window light, shallow depth "
+        "of field, glistening textures, steam when appropriate, no text, no "
+        "watermark, no people, no hands, no logos."
+    )

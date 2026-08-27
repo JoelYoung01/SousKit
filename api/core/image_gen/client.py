@@ -1,9 +1,10 @@
 """Image provider ABC + factory.
 
 Providers:
-  - stub  — no network; returns None (recipe keeps the default placeholder)
-  - broke — free public-domain / CC0 search via Openverse (default)
-  - qwen  — reserved for DashScope Qwen-Image later (needs API key)
+  - stub       — no network; returns None (recipe keeps the default placeholder)
+  - broke      — free public-domain / CC0 search via Openverse (default)
+  - openrouter — AI generation via OpenRouter Image API (needs OPENROUTER_API_KEY)
+  - qwen       — reserved for DashScope Qwen-Image later (needs API key)
 """
 
 from __future__ import annotations
@@ -166,6 +167,25 @@ def get_image_gen_client() -> ImageGenClient:
         return BrokeImageSearchClient(
             base_url=settings.OPENVERSE_BASE_URL,
             licenses=settings.OPENVERSE_LICENSES,
+        )
+    if provider == "openrouter":
+        key = (settings.OPENROUTER_API_KEY or "").strip()
+        if not key:
+            logger.warning(
+                "IMAGE_GEN_PROVIDER=openrouter but OPENROUTER_API_KEY is unset; "
+                "falling back to stub."
+            )
+            return StubImageGenClient()
+        from api.core.image_gen.openrouter import OpenRouterImageGenClient
+
+        return OpenRouterImageGenClient(
+            api_key=key,
+            model=settings.OPENROUTER_IMAGE_MODEL,
+            resolution=settings.OPENROUTER_IMAGE_RESOLUTION,
+            aspect_ratio=settings.OPENROUTER_IMAGE_ASPECT_RATIO,
+            base_url=settings.OPENROUTER_IMAGE_BASE_URL,
+            referer=settings.FRONTEND_HOST,
+            app_title=settings.PROJECT_NAME,
         )
     if provider == "qwen":
         key = (settings.DASHSCOPE_API_KEY or "").strip()
