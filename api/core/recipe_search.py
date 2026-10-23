@@ -106,6 +106,35 @@ def refresh_recipe_embedding(
         session.commit()
 
 
+def refresh_recipes_embeddings(
+    session: Session,
+    recipes: list[Recipe],
+    *,
+    client: EmbeddingClient | None = None,
+    commit: bool = True,
+) -> None:
+    """Batch-compute and persist embeddings for ``recipes`` (soft-fails)."""
+    if not recipes:
+        return
+    embedder = client or get_embedding_client()
+    for recipe in recipes:
+        if recipe.ingredients is None:
+            session.refresh(recipe, attribute_names=["ingredients"])
+    texts = [recipe_embedding_text(r) for r in recipes]
+    try:
+        vectors = embedder.embed(texts)
+    except Exception:
+        logger.exception("Failed to batch-embed %s recipes", len(recipes))
+        return
+    model_id = embedder.model_id
+    for recipe, vector in zip(recipes, vectors, strict=True):
+        recipe.embedding_json = dump_embedding(vector)
+        recipe.embedding_model = model_id
+        session.add(recipe)
+    if commit:
+        session.commit()
+
+
 def refresh_recipe_embedding_by_id(
     session: Session,
     recipe_id: int,

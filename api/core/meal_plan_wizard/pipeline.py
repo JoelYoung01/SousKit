@@ -26,7 +26,7 @@ from api.core.meal_plan_wizard.session_store import (
     WizardSession,
     WizardStep,
 )
-from api.core.recipe_search import refresh_recipe_embedding
+from api.core.recipe_search import refresh_recipes_embeddings
 from api.core.recipe_text import normalize_instruction_newlines
 from api.models import Ingredient, PlannedRecipe, Recipe, User
 
@@ -822,10 +822,11 @@ class MealPlanWizardPipeline:
             pairs = list(zip(session.days, session.built_recipes, strict=True))
 
         planned: list[PlannedRecipe] = []
+        created_recipes: list[Recipe] = []
+        household = ensure_user_household(db, user)
         for day, built in pairs:
             recipe_id = built.existing_recipe_id or built.created_recipe_id
             if recipe_id is None:
-                household = ensure_user_household(db, user)
                 db_recipe = Recipe(
                     created_by_id=user.id,
                     household_id=household.id,
@@ -860,7 +861,7 @@ class MealPlanWizardPipeline:
                     db.commit()
                     db.refresh(db_recipe)
 
-                refresh_recipe_embedding(db, db_recipe, commit=True)
+                created_recipes.append(db_recipe)
 
                 recipe_id = db_recipe.id
                 built.created_recipe_id = recipe_id
@@ -875,7 +876,6 @@ class MealPlanWizardPipeline:
                 tzinfo=UTC
             )
             planned_for = datetime.fromisoformat(f"{day}T12:00:00").replace(tzinfo=UTC)
-            household = ensure_user_household(db, user)
             # Replace any existing plan for that day in the household (one dinner slot)
             existing = db.exec(
                 select(PlannedRecipe).where(
@@ -898,6 +898,9 @@ class MealPlanWizardPipeline:
             db.refresh(pr)
             planned.append(pr)
 
+        if created_recipes:
+            refresh_recipes_embeddings(db, created_recipes, commit=True)
+
         session.step = "committed"
         return planned
 
@@ -909,6 +912,7 @@ class MealPlanWizardPipeline:
     ) -> list[PlannedRecipe]:
         """Persist any generated recipes and commit planned nights from the hub view."""
         planned: list[PlannedRecipe] = []
+        created_recipes: list[Recipe] = []
         household = ensure_user_household(db, user)
 
         for item in nights:
@@ -939,28 +943,7 @@ class MealPlanWizardPipeline:
                     raise ValueError(f"Recipe {recipe_id} could not be found.")
                 recipe_id = existing_rec.id
             elif raw_built:
-                built = (
-                    raw_built
-                    if isinstance(raw_built, WizardBuiltRecipe)
-                    else WizardBuiltRecipe(
-                        idea_id=str(raw_built.get("idea_id") or uuid.uuid4()),
-                        title=str(raw_built.get("title") or "Untitled dinner"),
-                        description=str(raw_built.get("description") or ""),
-                        instructions=normalize_instruction_newlines(
-                            str(raw_built.get("instructions") or "")
-                        ),
-                        notes=raw_built.get("notes"),
-                        prep_time=(
-                            float(raw_built["prep_time"])
-                            if raw_built.get("prep_time") is not None
-                            else None
-                        ),
-                        ingredients=list(raw_built.get("ingredients") or []),
-                        source=str(raw_built.get("source") or "generated"),
-                        existing_recipe_id=raw_built.get("existing_recipe_id"),
-                        created_recipe_id=raw_built.get("created_recipe_id"),
-                    )
-                )
+                built = self._coerce_built_recipe(raw_built)
                 candidate_id = built.existing_recipe_id or built.created_recipe_id
                 if candidate_id is not None:
                     existing_rec = db.get(Recipe, int(candidate_id))
@@ -1002,7 +985,7 @@ class MealPlanWizardPipeline:
                         db.commit()
                         db.refresh(db_recipe)
 
-                    refresh_recipe_embedding(db, db_recipe, commit=True)
+                    created_recipes.append(db_recipe)
                     recipe_id = db_recipe.id
             else:
                 continue
@@ -1029,7 +1012,476 @@ class MealPlanWizardPipeline:
             db.refresh(pr)
             planned.append(pr)
 
+        if created_recipes:
+            refresh_recipes_embeddings(db, created_recipes, commit=True)
+
         return planned
+
+    async def run_commit(
+        self,
+        session: WizardSession,
+        db: SessionDep,
+        user: User,
+        *,
+        day_assignments: list[dict[str, str]] | None = None,
+        plan: bool = True,
+    ) -> AsyncIterator[ProgressEvent]:
+        """Stream step-by-step progress while committing a wizard session."""
+        if session.step not in ("review", "build", "committed"):
+            yield ProgressEvent(
+                stage="commit",
+                status="error",
+                message="Finish building recipes before committing.",
+                progress=0,
+            )
+            return
+        if len(session.built_recipes) != session.day_count:
+            yield ProgressEvent(
+                stage="commit",
+                status="error",
+                message="Built recipe count does not match selected days.",
+                progress=0,
+            )
+            return
+
+        by_idea = {r.idea_id: r for r in session.built_recipes}
+        if day_assignments:
+            pairs: list[tuple[str, WizardBuiltRecipe]] = []
+            for row in day_assignments:
+                day = row["day"]
+                idea_id = row["idea_id"]
+                if day not in session.days:
+                    yield ProgressEvent(
+                        stage="commit",
+                        status="error",
+                        message=f"Day {day} is not part of this session.",
+                        progress=0,
+                    )
+                    return
+                recipe = by_idea.get(idea_id)
+                if not recipe:
+                    yield ProgressEvent(
+                        stage="commit",
+                        status="error",
+                        message=f"Unknown idea_id {idea_id}",
+                        progress=0,
+                    )
+                    return
+                pairs.append((day, recipe))
+            if len(pairs) != session.day_count:
+                yield ProgressEvent(
+                    stage="commit",
+                    status="error",
+                    message="Assign every selected day exactly once.",
+                    progress=0,
+                )
+                return
+        else:
+            pairs = list(zip(session.days, session.built_recipes, strict=True))
+
+        total = max(len(pairs), 1)
+        plural = "s" if len(pairs) != 1 else ""
+        yield self._log(
+            session,
+            "commit",
+            "running",
+            (
+                f"Preparing to save {len(pairs)} dinner{plural}…"
+                if plan
+                else "Preparing to save your recipe…"
+            ),
+            0.08,
+        )
+        await asyncio.sleep(0.2)
+
+        household = ensure_user_household(db, user)
+        created_recipes: list[Recipe] = []
+        planned_ids: list[int] = []
+        created_recipe_ids: list[int] = []
+
+        for idx, (day, built) in enumerate(pairs):
+            base_prog = 0.12 + 0.72 * (idx / total)
+            step_span = 0.72 / total
+            recipe_id = built.existing_recipe_id or built.created_recipe_id
+            if recipe_id is None:
+                yield self._log(
+                    session,
+                    "commit",
+                    "running",
+                    f"Saving recipe “{built.title}”…",
+                    round(base_prog + step_span * 0.15, 2),
+                    {"day": day, "title": built.title, "index": idx, "total": total},
+                )
+                await asyncio.sleep(0.18)
+
+                db_recipe = Recipe(
+                    created_by_id=user.id,
+                    household_id=household.id,
+                    created_on=datetime.now(UTC),
+                    name=built.title,
+                    description=built.description,
+                    instructions=built.instructions,
+                    notes=built.notes,
+                    public=False,
+                    prep_time=built.prep_time,
+                )
+                db.add(db_recipe)
+                db.commit()
+                db.refresh(db_recipe)
+                for ing in built.ingredients:
+                    db_ing = Ingredient(
+                        created_by_id=user.id,
+                        created_on=datetime.now(UTC),
+                        name=str(ing.get("name") or "ingredient"),
+                        amount=ing.get("amount"),
+                        units=ing.get("units"),
+                        details=ing.get("details"),
+                        recipe_id=db_recipe.id,
+                    )
+                    db.add(db_ing)
+                db.commit()
+
+                yield self._log(
+                    session,
+                    "commit",
+                    "running",
+                    f"Finding cover photo for “{built.title}”…",
+                    round(base_prog + step_span * 0.45, 2),
+                    {"day": day, "title": built.title, "index": idx, "total": total},
+                )
+                await asyncio.sleep(0.15)
+
+                cover_id = await asyncio.to_thread(
+                    self._maybe_attach_cover, db, user, built
+                )
+                if cover_id is not None:
+                    db_recipe.cover_image_id = cover_id
+                    db.add(db_recipe)
+                    db.commit()
+                    db.refresh(db_recipe)
+
+                created_recipes.append(db_recipe)
+                recipe_id = db_recipe.id
+                built.created_recipe_id = recipe_id
+                built.source = "generated"
+                created_recipe_ids.append(recipe_id)
+            else:
+                created_recipe_ids.append(recipe_id)
+
+            if not plan:
+                continue
+
+            yield self._log(
+                session,
+                "commit",
+                "running",
+                f"Scheduling “{built.title}” for {day}…",
+                round(base_prog + step_span * 0.85, 2),
+                {"day": day, "title": built.title, "recipe_id": recipe_id},
+            )
+            await asyncio.sleep(0.18)
+
+            day_start = datetime.fromisoformat(f"{day}T00:00:00").replace(tzinfo=UTC)
+            day_end = datetime.fromisoformat(f"{day}T23:59:59.999999").replace(
+                tzinfo=UTC
+            )
+            planned_for = datetime.fromisoformat(f"{day}T12:00:00").replace(tzinfo=UTC)
+            existing = db.exec(
+                select(PlannedRecipe).where(
+                    PlannedRecipe.household_id == household.id,
+                    PlannedRecipe.planned_for >= day_start,
+                    PlannedRecipe.planned_for <= day_end,
+                )
+            ).all()
+            for old in existing:
+                db.delete(old)
+            pr = PlannedRecipe(
+                recipe_id=recipe_id,
+                created_by_id=user.id,
+                household_id=household.id,
+                created_on=datetime.now(UTC),
+                planned_for=planned_for,
+            )
+            db.add(pr)
+            db.commit()
+            db.refresh(pr)
+            planned_ids.append(pr.id)
+
+        if created_recipes:
+            yield self._log(
+                session,
+                "commit",
+                "running",
+                (
+                    f"Indexing {len(created_recipes)} new recipe"
+                    f"{'s' if len(created_recipes) != 1 else ''} for search…"
+                ),
+                0.9,
+            )
+            await asyncio.sleep(0.18)
+            refresh_recipes_embeddings(db, created_recipes, commit=True)
+
+        session.step = "committed"
+        saved_plural = "s" if len(planned_ids) != 1 else ""
+        yield self._log(
+            session,
+            "commit",
+            "complete",
+            (
+                f"Saved {len(planned_ids)} dinner{saved_plural} to your meal plan."
+                if plan
+                else "Recipe saved to your collection."
+            ),
+            1.0,
+            {
+                "planned_ids": planned_ids,
+                "recipe_ids": created_recipe_ids,
+            },
+        )
+        await asyncio.sleep(0.25)
+
+    async def run_commit_nights(
+        self,
+        db: SessionDep,
+        user: User,
+        nights: list[dict[str, Any]],
+    ) -> AsyncIterator[ProgressEvent]:
+        """Stream step-by-step progress while committing hub nights."""
+        valid_nights = [item for item in nights if str(item.get("day") or "").strip()]
+        total = max(len(valid_nights), 1)
+
+        yield ProgressEvent(
+            stage="commit",
+            status="running",
+            message=(
+                f"Preparing to save {len(valid_nights)} planned night"
+                f"{'s' if len(valid_nights) != 1 else ''}…"
+            ),
+            progress=0.06,
+        )
+        await asyncio.sleep(0.2)
+
+        household = ensure_user_household(db, user)
+        created_recipes: list[Recipe] = []
+        planned_ids: list[int] = []
+        saved_days: list[dict[str, Any]] = []
+
+        for idx, item in enumerate(valid_nights):
+            day = str(item.get("day") or "").strip()
+            base_prog = 0.1 + 0.75 * (idx / total)
+            step_span = 0.75 / total
+
+            try:
+                day_start = datetime.fromisoformat(f"{day}T00:00:00").replace(
+                    tzinfo=UTC
+                )
+                day_end = datetime.fromisoformat(f"{day}T23:59:59.999999").replace(
+                    tzinfo=UTC
+                )
+                planned_for = datetime.fromisoformat(f"{day}T12:00:00").replace(
+                    tzinfo=UTC
+                )
+            except ValueError:
+                yield ProgressEvent(
+                    stage="commit",
+                    status="error",
+                    message=f"Invalid date key: {day}",
+                    progress=0,
+                )
+                return
+
+            recipe_id: int | None = item.get("recipe_id")
+            raw_built = item.get("built_recipe")
+            title_label = "dinner"
+
+            if recipe_id is not None:
+                existing_rec = db.get(Recipe, int(recipe_id))
+                if not existing_rec or not user_can_access_recipe(
+                    db, user, existing_rec
+                ):
+                    yield ProgressEvent(
+                        stage="commit",
+                        status="error",
+                        message=f"Recipe {recipe_id} could not be found.",
+                        progress=0,
+                    )
+                    return
+                recipe_id = existing_rec.id
+                title_label = existing_rec.name
+            elif raw_built:
+                built = self._coerce_built_recipe(raw_built)
+                title_label = built.title
+                candidate_id = built.existing_recipe_id or built.created_recipe_id
+                if candidate_id is not None:
+                    existing_rec = db.get(Recipe, int(candidate_id))
+                    if existing_rec and user_can_access_recipe(db, user, existing_rec):
+                        recipe_id = existing_rec.id
+
+                if recipe_id is None:
+                    yield ProgressEvent(
+                        stage="commit",
+                        status="running",
+                        message=(
+                            f"Saving new recipe “{built.title}” "
+                            f"({idx + 1} of {total})…"
+                        ),
+                        progress=round(base_prog + step_span * 0.15, 2),
+                        data={
+                            "day": day,
+                            "title": built.title,
+                            "index": idx,
+                            "total": total,
+                        },
+                    )
+                    await asyncio.sleep(0.18)
+
+                    db_recipe = Recipe(
+                        created_by_id=user.id,
+                        household_id=household.id,
+                        created_on=datetime.now(UTC),
+                        name=built.title,
+                        description=built.description,
+                        instructions=built.instructions,
+                        notes=built.notes,
+                        public=False,
+                        prep_time=built.prep_time,
+                    )
+                    db.add(db_recipe)
+                    db.commit()
+                    db.refresh(db_recipe)
+                    for ing in built.ingredients:
+                        db_ing = Ingredient(
+                            created_by_id=user.id,
+                            created_on=datetime.now(UTC),
+                            name=str(ing.get("name") or "ingredient"),
+                            amount=ing.get("amount"),
+                            units=ing.get("units"),
+                            details=ing.get("details"),
+                            recipe_id=db_recipe.id,
+                        )
+                        db.add(db_ing)
+                    db.commit()
+
+                    yield ProgressEvent(
+                        stage="commit",
+                        status="running",
+                        message=f"Finding cover photo for “{built.title}”…",
+                        progress=round(base_prog + step_span * 0.45, 2),
+                        data={
+                            "day": day,
+                            "title": built.title,
+                            "index": idx,
+                            "total": total,
+                        },
+                    )
+                    await asyncio.sleep(0.15)
+
+                    cover_id = await asyncio.to_thread(
+                        self._maybe_attach_cover, db, user, built
+                    )
+                    if cover_id is not None:
+                        db_recipe.cover_image_id = cover_id
+                        db.add(db_recipe)
+                        db.commit()
+                        db.refresh(db_recipe)
+
+                    created_recipes.append(db_recipe)
+                    recipe_id = db_recipe.id
+            else:
+                continue
+
+            yield ProgressEvent(
+                stage="commit",
+                status="running",
+                message=f"Scheduling “{title_label}” for {day}…",
+                progress=round(base_prog + step_span * 0.85, 2),
+                data={
+                    "day": day,
+                    "title": title_label,
+                    "recipe_id": recipe_id,
+                    "index": idx,
+                    "total": total,
+                },
+            )
+            await asyncio.sleep(0.18)
+
+            existing_plans = db.exec(
+                select(PlannedRecipe).where(
+                    PlannedRecipe.household_id == household.id,
+                    PlannedRecipe.planned_for >= day_start,
+                    PlannedRecipe.planned_for <= day_end,
+                )
+            ).all()
+            for old in existing_plans:
+                db.delete(old)
+
+            pr = PlannedRecipe(
+                recipe_id=recipe_id,
+                created_by_id=user.id,
+                household_id=household.id,
+                created_on=datetime.now(UTC),
+                planned_for=planned_for,
+            )
+            db.add(pr)
+            db.commit()
+            db.refresh(pr)
+            planned_ids.append(pr.id)
+            saved_days.append(
+                {"day": day, "recipe_id": recipe_id, "title": title_label}
+            )
+
+        if created_recipes:
+            yield ProgressEvent(
+                stage="commit",
+                status="running",
+                message=(
+                    f"Indexing {len(created_recipes)} new recipe"
+                    f"{'s' if len(created_recipes) != 1 else ''} for search…"
+                ),
+                progress=0.9,
+            )
+            await asyncio.sleep(0.18)
+            refresh_recipes_embeddings(db, created_recipes, commit=True)
+
+        yield ProgressEvent(
+            stage="commit",
+            status="complete",
+            message=(
+                f"Saved {len(planned_ids)} dinner"
+                f"{'s' if len(planned_ids) != 1 else ''} to your meal plan."
+            ),
+            progress=1.0,
+            data={
+                "planned_ids": planned_ids,
+                "saved_days": saved_days,
+            },
+        )
+        await asyncio.sleep(0.25)
+
+    @staticmethod
+    def _coerce_built_recipe(
+        raw_built: WizardBuiltRecipe | dict[str, Any],
+    ) -> WizardBuiltRecipe:
+        if isinstance(raw_built, WizardBuiltRecipe):
+            return raw_built
+        return WizardBuiltRecipe(
+            idea_id=str(raw_built.get("idea_id") or uuid.uuid4()),
+            title=str(raw_built.get("title") or "Untitled dinner"),
+            description=str(raw_built.get("description") or ""),
+            instructions=normalize_instruction_newlines(
+                str(raw_built.get("instructions") or "")
+            ),
+            notes=raw_built.get("notes"),
+            prep_time=(
+                float(raw_built["prep_time"])
+                if raw_built.get("prep_time") is not None
+                else None
+            ),
+            ingredients=list(raw_built.get("ingredients") or []),
+            source=str(raw_built.get("source") or "generated"),
+            existing_recipe_id=raw_built.get("existing_recipe_id"),
+            created_recipe_id=raw_built.get("created_recipe_id"),
+        )
 
     def _maybe_attach_cover(
         self,

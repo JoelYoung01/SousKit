@@ -185,7 +185,12 @@ onUnmounted(() => {
         autocomplete="off"
         :disabled="addingItem"
       />
-      <Button type="submit" size="icon" class="shrink-0" :disabled="!newItemName.trim() || addingItem">
+      <Button
+        type="submit"
+        size="icon"
+        class="shrink-0"
+        :disabled="!newItemName.trim() || addingItem"
+      >
         <Plus class="size-4" />
         <span class="sr-only">Add item</span>
       </Button>

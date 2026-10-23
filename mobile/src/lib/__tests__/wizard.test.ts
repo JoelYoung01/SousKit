@@ -1,4 +1,6 @@
 import { startOfDay } from "../dates";
+import * as sse from "../../api/sse";
+import { streamCommitWizard, streamCommitWizardNights } from "../../api/wizard";
 import {
   buildCommitNightsPayload,
   buildWizardWeeks,
@@ -87,3 +89,29 @@ describe("buildCommitNightsPayload", () => {
     expect(payload[1]?.built_recipe?.title).toBe("Generated Tacos");
   });
 });
+
+describe("streamCommitWizardNights & streamCommitWizard", () => {
+  it("streams commit events from /meal-plan-wizard/commit-plan-stream/ and /sessions/:id/commit-stream/", async () => {
+    const spy = jest.spyOn(sse, "postSse").mockResolvedValue(undefined);
+    const onEvent = jest.fn();
+
+    await streamCommitWizardNights([{ day: "2026-10-25", recipe_id: 42 }], onEvent);
+    expect(spy).toHaveBeenCalledWith(
+      "/meal-plan-wizard/commit-plan-stream/",
+      { nights: [{ day: "2026-10-25", recipe_id: 42 }] },
+      onEvent,
+      undefined
+    );
+
+    await streamCommitWizard("sess-123", { plan: false }, onEvent);
+    expect(spy).toHaveBeenCalledWith(
+      "/meal-plan-wizard/sessions/sess-123/commit-stream/",
+      { plan: false },
+      onEvent,
+      undefined
+    );
+
+    spy.mockRestore();
+  });
+});
+
