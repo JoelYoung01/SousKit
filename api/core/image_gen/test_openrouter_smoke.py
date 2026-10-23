@@ -86,6 +86,22 @@ def test_factory_openrouter_without_key() -> None:
         assert isinstance(client, StubImageGenClient)
 
 
+def test_factory_defaults_to_stub_placeholder() -> None:
+    from api.core.config import settings
+    from api.core.image_gen.client import StubImageGenClient, get_image_gen_client
+
+    assert settings.IMAGE_GEN_PROVIDER == "stub"
+    client = get_image_gen_client()
+    assert isinstance(client, StubImageGenClient)
+    assert client.generate("Chicken Tikka Masala") is None
+    assert client.generate_candidates("Chicken Tikka Masala", limit=4) == []
+
+    # Legacy "broke" provider string also falls back cleanly to the placeholder stub
+    with patch.object(settings, "IMAGE_GEN_PROVIDER", "broke"):
+        legacy_client = get_image_gen_client()
+        assert isinstance(legacy_client, StubImageGenClient)
+
+
 def test_live_openrouter() -> None:
     key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
     if not key:
@@ -116,6 +132,7 @@ def main() -> int:
     test_parse_image_item()
     test_generate_candidates_mocked()
     test_factory_openrouter_without_key()
+    test_factory_defaults_to_stub_placeholder()
     test_live_openrouter()
     print("All image_gen openrouter tests passed")
     return 0

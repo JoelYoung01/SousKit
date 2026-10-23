@@ -79,8 +79,7 @@ def build_recipe_image_prompt(
 ) -> str:
     """Build a short food-photo query from recipe fields.
 
-    Used as a diffusion prompt later, and as an Openverse search query for the
-    broke adapter. Prefer the dish title so renaming the recipe changes results.
+    Prefer the dish title so renaming the recipe changes results.
     """
     clean_title = (title or "").strip()
     keywords = recipe_image_keywords(title, ingredients)

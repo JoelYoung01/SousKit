@@ -143,10 +143,10 @@ def generate_recipe_cover(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
-    """Fetch/generate cover image options from the active image provider.
+    """Generate cover image options from the active image provider.
 
-    Search providers (broke / Openverse) return up to ``limit`` candidates so
-    the client can show a picker. True generators return a single option.
+    Providers that support multiple candidates return up to ``limit`` options
+    so the client can show a picker. Single-image providers return one option.
     Creates Upload rows owned by the current user; the client sets
     ``cover_image_id`` on create/update after the user picks one.
     """
@@ -165,9 +165,9 @@ def generate_recipe_cover(
     if not uploads:
         if provider == "stub":
             detail = (
-                "Cover image search isn’t enabled on this server. "
+                "Cover image generation isn’t enabled on this server. "
                 "Upload your own photo, or ask an admin to set "
-                "IMAGE_GEN_PROVIDER=broke or IMAGE_GEN_PROVIDER=openrouter."
+                "IMAGE_GEN_PROVIDER=openrouter."
             )
         elif provider == "openrouter":
             detail = (

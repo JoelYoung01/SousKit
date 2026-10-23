@@ -79,15 +79,14 @@ The admin seed also receives `SUPERUSER_GID` when set.
 
 ## Recipe cover images (generated recipes)
 
-- On wizard **commit**, newly created recipes get a cover via `api/core/image_gen/` (ABC + factory, same pattern as the LLM client).
-- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients, optional `limit` default 4, optional `exclude_keys`) which returns `{ provider, mode, options: [{ …Upload fields, skip_key }] }`. Search providers (`broke`) use `mode: "pick"` so the UI shows a chooser; the form binds the chosen option as `cover_image_id`. Dismissed options’ `skip_key` values are stored per-recipe in local storage and sent back as `exclude_keys` so Search again / Generate skips them.
+- On wizard **commit** and **URL import**, newly created recipes optionally get a cover via `api/core/image_gen/` (ABC + factory, same pattern as the LLM client).
+- Recipe edit also has **Generate image** → `POST /api/recipe/generate-cover/` (body: name, optional description/ingredients, optional `limit` default 4, optional `exclude_keys`) which returns `{ provider, mode, options: [{ …Upload fields, skip_key }] }`. Providers that support multiple candidates use `mode: "pick"` so the UI shows a chooser; the form binds the chosen option as `cover_image_id`. Dismissed options’ `skip_key` values are stored per-recipe in local storage and sent back as `exclude_keys` so Generate again skips them.
 - `IMAGE_GEN_PROVIDER` selects the adapter:
-  - `broke` (default) — free Openverse search limited to `cc0,pdm` (public domain); downloads bytes into `UPLOAD_DIR` and returns up to `limit` candidates. Queries are **title-first** so renaming a recipe and regenerating changes results. No API key.
+  - `stub` (default) — skip network; leave cover unset (UI shows the default placeholder); generate-cover returns 404 with a clear message.
   - `openrouter` — AI-generated food photos via OpenRouter's Image API (`POST /api/v1/images`). Reuses `OPENROUTER_API_KEY`. Default model `bytedance-seed/seedream-4.5` (Seedream 4.5: photoreal food shots, ~$0.04/image at 2K, supports multiple candidates per call). Override with `OPENROUTER_IMAGE_MODEL`, `OPENROUTER_IMAGE_RESOLUTION` (default `2K`; Seedream rejects 1K), `OPENROUTER_IMAGE_ASPECT_RATIO` (default `1:1` for recipe cards).
-  - `stub` — skip network; leave cover unset (UI shows the default placeholder); generate-cover returns 404 with a clear message.
   - `qwen` — reserved for DashScope Qwen-Image-3.0; needs `DASHSCOPE_API_KEY` (not implemented yet).
-- Failures are soft on wizard commit: commit still succeeds if search/download/generation fails. The edit-page button surfaces a 404 when nothing suitable is found.
-- Openverse (`broke`) requires outbound HTTPS to `api.openverse.org` (and image CDN hosts in results). OpenRouter requires outbound HTTPS to `openrouter.ai`.
+- Failures are soft on wizard commit: commit still succeeds if generation fails. The edit-page button surfaces a 404 when nothing suitable is found.
+- OpenRouter requires outbound HTTPS to `openrouter.ai`.
 - Manual uploads: `POST /api/upload/` (multipart field `file`). The filename must be non-empty — empty filenames are rejected with a clear 422 (previously a validation serialization bug made this look like a client "network error").
 
 ## iOS app (`mobile/`)

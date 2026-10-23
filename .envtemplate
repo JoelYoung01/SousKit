@@ -74,11 +74,9 @@ SUPERUSER_GID=
 # OPENROUTER_IMAGE_ASPECT_RATIO=1:1
 # OPENROUTER_IMAGE_BASE_URL=https://openrouter.ai/api/v1/images
 
-# Cover images for newly generated recipes (meal-plan wizard commit).
-# Providers: stub | broke (default, free Openverse CC0/PDM search) | openrouter | qwen
-# IMAGE_GEN_PROVIDER=broke
-# OPENVERSE_BASE_URL=https://api.openverse.org/v1
-# OPENVERSE_LICENSES=cc0,pdm
+# Cover images for newly generated recipes (meal-plan wizard commit / URL import).
+# Providers: stub (default — leave cover unset so the placeholder is used) | openrouter | qwen
+# IMAGE_GEN_PROVIDER=stub
 # Future paid diffusion (not wired yet):
 # DASHSCOPE_API_KEY=
 # QWEN_IMAGE_MODEL=qwen-image-3.0-pro

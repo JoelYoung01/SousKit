@@ -127,13 +127,10 @@ class Settings(BaseSettings):
     OPENROUTER_IMAGE_BASE_URL: str = "https://openrouter.ai/api/v1/images"
 
     # Cover-image provider for newly generated recipes.
-    #   stub       — no network; leave cover unset
-    #   broke      — free CC0/public-domain search via Openverse (default)
+    #   stub       — no network; leave cover unset so the placeholder is used (default)
     #   openrouter — AI generation via OpenRouter (OPENROUTER_API_KEY)
     #   qwen       — DashScope Qwen-Image (requires DASHSCOPE_API_KEY; not wired yet)
-    IMAGE_GEN_PROVIDER: str = "broke"
-    OPENVERSE_BASE_URL: str = "https://api.openverse.org/v1"
-    OPENVERSE_LICENSES: str = "cc0,pdm"
+    IMAGE_GEN_PROVIDER: str = "stub"
     DASHSCOPE_API_KEY: str | None = None
     QWEN_IMAGE_MODEL: str = "qwen-image-3.0-pro"
     DASHSCOPE_IMAGE_BASE_URL: str = (

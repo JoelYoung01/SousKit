@@ -1,8 +1,7 @@
 """Image provider ABC + factory.
 
 Providers:
-  - stub       — no network; returns None (recipe keeps the default placeholder)
-  - broke      — free public-domain / CC0 search via Openverse (default)
+  - stub       — no network; returns None (keeps default placeholder; default)
   - openrouter — AI generation via OpenRouter Image API (needs OPENROUTER_API_KEY)
   - qwen       — reserved for DashScope Qwen-Image later (needs API key)
 """
@@ -31,14 +30,11 @@ class ImageGenResult:
 
     @property
     def skip_key(self) -> str:
-        """Stable id so clients can dismiss this image on later searches."""
+        """Stable id so clients can dismiss this image on later generations."""
         meta = self.metadata or {}
         cached = meta.get("skip_key")
         if isinstance(cached, str) and cached.strip():
             return cached.strip()
-        ov = meta.get("openverse_id")
-        if ov:
-            return f"ov:{ov}"
         if self.source_url:
             return f"url:{self.source_url}"
         # Last resort: content fingerprint (not ideal across regenerations).
@@ -148,26 +144,17 @@ class QwenImageGenClient(ImageGenClient):
         exclude_keys: set[str] | None = None,
     ) -> ImageGenResult | None:
         raise NotImplementedError(
-            "Qwen image client is not wired yet. Set IMAGE_GEN_PROVIDER=broke "
-            "(free Openverse search) or IMAGE_GEN_PROVIDER=stub, or implement "
-            "the DashScope call here once DASHSCOPE_API_KEY is configured."
+            "Qwen image client is not wired yet. Set IMAGE_GEN_PROVIDER=openrouter "
+            "or IMAGE_GEN_PROVIDER=stub, or implement the DashScope call here "
+            "once DASHSCOPE_API_KEY is configured."
         )
 
 
 def get_image_gen_client() -> ImageGenClient:
     """Factory gated by IMAGE_GEN_PROVIDER (+ optional provider credentials)."""
-    provider = (settings.IMAGE_GEN_PROVIDER or "broke").strip().lower()
-    if provider in ("", "none", "off", "disabled"):
+    provider = (settings.IMAGE_GEN_PROVIDER or "stub").strip().lower()
+    if provider in ("", "none", "off", "disabled", "stub"):
         return StubImageGenClient()
-    if provider == "stub":
-        return StubImageGenClient()
-    if provider == "broke":
-        from api.core.image_gen.broke import BrokeImageSearchClient
-
-        return BrokeImageSearchClient(
-            base_url=settings.OPENVERSE_BASE_URL,
-            licenses=settings.OPENVERSE_LICENSES,
-        )
     if provider == "openrouter":
         key = (settings.OPENROUTER_API_KEY or "").strip()
         if not key:

@@ -110,19 +110,19 @@ class RecipeCoverIngredientHint(BaseModel):
 
 
 class RecipeCoverGenerateRequest(BaseModel):
-    """Fields used to search/generate a cover; works before a recipe is saved."""
+    """Fields used to generate a cover; works before a recipe is saved."""
 
     name: str = Field(min_length=1)
     description: str | None = None
     ingredients: list[RecipeCoverIngredientHint] = Field(default_factory=list)
-    #: How many candidate images to return (search providers may return fewer).
+    #: How many candidate images to return (providers may return fewer).
     limit: int = Field(default=4, ge=1, le=8)
-    #: Skip keys the user dismissed for this recipe (Openverse id / source url).
+    #: Skip keys the user dismissed for this recipe.
     exclude_keys: list[str] = Field(default_factory=list, max_length=200)
 
 
 class RecipeCoverOption(BaseModel):
-    """One cover candidate, including a dismiss key for later searches."""
+    """One cover candidate, including a dismiss key for later generations."""
 
     id: int
     name: str
@@ -138,9 +138,9 @@ class RecipeCoverOption(BaseModel):
 
 
 class RecipeCoverGenerateResponse(BaseModel):
-    """Cover search/generation result for the recipe edit UI.
+    """Cover generation result for the recipe edit UI.
 
-    When ``mode`` is ``pick`` (Openverse / broke), the client should show the
+    When ``mode`` is ``pick``, the client should show the
     options and let the user choose. When ``single``, apply ``options[0]``.
     """
 
