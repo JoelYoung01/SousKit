@@ -24,6 +24,7 @@ from api.schemas import (
     MealPlanWizardCreate,
     MealPlanWizardDaysUpdate,
     MealPlanWizardFreeformBuildRequest,
+    MealPlanWizardPlanCommitRequest,
     MealPlanWizardPrefs,
     MealPlanWizardRefineRequest,
     MealPlanWizardRewindRequest,
@@ -288,7 +289,9 @@ async def build_freeform(
                     wizard_sessions.touch(session)
                     yield event
         except Exception as exc:
-            logger.exception("meal-plan wizard freeform build failed for %s", session_id)
+            logger.exception(
+                "meal-plan wizard freeform build failed for %s", session_id
+            )
             yield ProgressEvent(
                 stage="build",
                 status="error",
@@ -324,3 +327,81 @@ def commit_session(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     wizard_sessions.touch(session)
     return planned
+
+
+@router.post("/sessions/{session_id}/commit-stream/")
+async def commit_session_stream(
+    session_id: str,
+    current_user: CurrentUserDep,
+    body: MealPlanWizardCommitRequest | None = None,
+):
+    session = _get_owned_session(session_id, current_user.id)
+    assignments = None
+    plan = True
+    if body:
+        if body.assignments:
+            assignments = [a.model_dump() for a in body.assignments]
+        plan = body.plan
+
+    async def gen():
+        try:
+            with Session(engine) as db:
+                async for event in pipeline.run_commit(
+                    session,
+                    db,
+                    current_user,
+                    day_assignments=assignments,
+                    plan=plan,
+                ):
+                    wizard_sessions.touch(session)
+                    yield event
+        except Exception as exc:
+            logger.exception("meal-plan wizard commit stream failed for %s", session_id)
+            yield ProgressEvent(
+                stage="commit",
+                status="error",
+                message=str(exc) or "Could not save plan.",
+                progress=0,
+            )
+
+    return StreamingResponse(_sse(gen()), media_type="text/event-stream")
+
+
+@router.post(
+    "/commit-plan/",
+    response_model=list[PlannedRecipeDetail],
+)
+def commit_plan_nights(
+    body: MealPlanWizardPlanCommitRequest,
+    current_user: CurrentUserDep,
+    db: SessionDep,
+):
+    nights = [n.model_dump() for n in body.nights]
+    try:
+        return pipeline.commit_nights(db, current_user, nights)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commit-plan-stream/")
+async def commit_plan_nights_stream(
+    body: MealPlanWizardPlanCommitRequest,
+    current_user: CurrentUserDep,
+):
+    nights = [n.model_dump() for n in body.nights]
+
+    async def gen():
+        try:
+            with Session(engine) as db:
+                async for event in pipeline.run_commit_nights(db, current_user, nights):
+                    yield event
+        except Exception as exc:
+            logger.exception("meal-plan wizard commit-plan-stream failed")
+            yield ProgressEvent(
+                stage="commit",
+                status="error",
+                message=str(exc) or "Could not save plan.",
+                progress=0,
+            )
+
+    return StreamingResponse(_sse(gen()), media_type="text/event-stream")

@@ -514,3 +514,13 @@ class MealPlanWizardCommitRequest(BaseModel):
     assignments: list[MealPlanWizardDayAssignment] | None = None
     # When False, persist generated recipes but do not create planned_recipe rows.
     plan: bool = True
+
+
+class MealPlanWizardNightCommitItem(BaseModel):
+    day: str
+    recipe_id: int | None = None
+    built_recipe: MealPlanWizardBuiltRecipe | None = None
+
+
+class MealPlanWizardPlanCommitRequest(BaseModel):
+    nights: list[MealPlanWizardNightCommitItem] = Field(default_factory=list)

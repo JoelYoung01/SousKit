@@ -1,12 +1,11 @@
-import { HomeWeekStrip } from "@/components/HomeWeekStrip";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
 import { colors } from "@/lib/colors";
-import { addDays, formatPrepTime, startOfDay, startOfWeekMonday, toDateKey } from "@/lib/dates";
+import { addDays, startOfDay, startOfWeekMonday, toDateKey } from "@/lib/dates";
 import { tapHaptic } from "@/lib/haptics";
 import { mediaSource } from "@/lib/media";
-import { planDayKey, usePlansRange } from "@/hooks/use-planner";
+import { usePlansRange } from "@/hooks/use-planner";
 import { useGrocerySummary } from "@/hooks/use-grocery";
 import { useRecipeCount } from "@/hooks/use-recipes";
 import { useSessionStore } from "@/stores/session";
@@ -14,8 +13,8 @@ import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { Plus, Search, ShoppingCart, Sparkles, User } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, Plus, Search, ShoppingCart, Sparkles, User } from "lucide-react-native";
+import { useEffect, useMemo } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -26,52 +25,24 @@ export default function HomeScreen() {
 
   const today = useMemo(() => startOfDay(), []);
   const thisWeekStart = useMemo(() => startOfWeekMonday(today), [today]);
+  const thisWeekEnd = useMemo(() => addDays(thisWeekStart, 6), [thisWeekStart]);
 
-  const [visibleDays, setVisibleDays] = useState<Date[]>(() =>
-    Array.from({ length: 7 }, (_, i) => addDays(thisWeekStart, i))
-  );
-  const [range, setRange] = useState(() => ({
-    start: addDays(thisWeekStart, -7),
-    end: addDays(thisWeekStart, 13)
-  }));
-  const [weekStripDragging, setWeekStripDragging] = useState(false);
-
-  const plansQuery = usePlansRange(range.start, range.end);
+  const plansQuery = usePlansRange(thisWeekStart, thisWeekEnd);
   const recipeCount = useRecipeCount();
   const groceryCount = useGrocerySummary();
 
   useEffect(() => {
-    if (plansQuery.isError) toast.fromError(plansQuery.error, "Couldn’t load this week’s plan.");
+    if (plansQuery.isError) toast.fromError(plansQuery.error, "Couldn’t load tonight’s plan.");
   }, [plansQuery.isError, plansQuery.error]);
 
   const plans = useMemo(() => plansQuery.data ?? [], [plansQuery.data]);
-  const plannedKeys = useMemo(() => new Set(plans.map(planDayKey)), [plans]);
-  const plannedCount = visibleDays.filter((d) => plannedKeys.has(toDateKey(d))).length;
-  const gapDays = visibleDays.filter((d) => !plannedKeys.has(toDateKey(d)));
 
   const todayKey = toDateKey(today);
   const tonight = plans.find((p) => p.planned_for.startsWith(todayKey)) ?? null;
-  const tonightMeta = tonight ? formatPrepTime(tonight.recipe.prep_time) || "Tonight’s plan" : "";
   const showHeroSkeleton = plansQuery.isPending && !tonight;
+  const hasPendingGrocery = (groceryCount.data ?? 0) > 0;
 
   const weekdayName = today.toLocaleDateString(undefined, { weekday: "long" });
-
-  const onWeekChange = useCallback((_start: Date, days: Date[], rangeStart: Date, rangeEnd: Date) => {
-    setVisibleDays(days);
-    setRange({ start: rangeStart, end: rangeEnd });
-  }, []);
-
-  const openDay = useCallback(
-    (date: Date) => {
-      router.push(`/planner?date=${toDateKey(date)}` as never);
-    },
-    [router]
-  );
-
-  const openFillGaps = () => {
-    tapHaptic();
-    router.push(`/planner/fill?days=${gapDays.map(toDateKey).join(",")}` as never);
-  };
 
   const cookTonight = () => {
     if (!tonight) {
@@ -82,11 +53,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerClassName="pb-6"
-      scrollEnabled={!weekStripDragging}
-    >
+    <ScrollView className="flex-1 bg-background" contentContainerClassName="pb-6">
       {/* Tonight hero */}
       <View className="h-[300px] overflow-hidden">
         {tonight ? (
@@ -133,26 +100,15 @@ export default function HomeScreen() {
               TONIGHT
             </Text>
             {tonight ? (
-              <>
-                <Text className="mt-0.5 font-sans-bold text-xl leading-tight tracking-tight">
-                  {tonight.recipe.name}
-                </Text>
-                <Text className="mt-0.5 text-xs text-foreground/75">{tonightMeta}</Text>
-              </>
+              <Text className="mt-0.5 font-sans-bold text-xl leading-tight tracking-tight">
+                {tonight.recipe.name}
+              </Text>
             ) : showHeroSkeleton ? (
-              <>
-                <Skeleton className="mt-1.5 h-6 w-40 bg-foreground/20" />
-                <Skeleton className="mt-2 h-3 w-28 bg-foreground/15" />
-              </>
+              <Skeleton className="mt-1.5 h-6 w-40 bg-foreground/20" />
             ) : (
-              <>
-                <Text className="mt-0.5 font-sans-bold text-xl leading-tight tracking-tight">
-                  Nothing planned
-                </Text>
-                <Text className="mt-0.5 text-xs text-foreground/75">
-                  Pick something for tonight
-                </Text>
-              </>
+              <Text className="mt-0.5 font-sans-bold text-xl leading-tight tracking-tight">
+                Nothing planned
+              </Text>
             )}
           </View>
           <Button
@@ -165,28 +121,24 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Week strip */}
-      <View className="px-5 pt-4">
-        <HomeWeekStrip
-          plannedKeys={plannedKeys}
-          onWeekChange={onWeekChange}
-          onSelectDay={openDay}
-          onHorizontalDragChange={setWeekStripDragging}
-        />
-        <View className="mt-2 flex-row items-center justify-between">
-          <Text className="text-xs text-muted-foreground">
-            {plannedCount} of 7 dinners planned
-          </Text>
-          <Pressable onPress={openFillGaps} hitSlop={8} className="active:opacity-70">
-            <Text className="font-sans-semibold text-[12.5px] text-[#22c55e]">
-              Fill the gaps →
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-
       {/* Action cards — 2×2 grid */}
       <View className="flex-row flex-wrap justify-between gap-y-2 px-5 pt-4">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Meal Plan"
+          onPress={() => {
+            tapHaptic();
+            router.push("/planner/fill" as never);
+          }}
+          className="min-h-[104px] w-[48.5%] items-start justify-between rounded-xl border border-border bg-card p-3.5 active:opacity-80"
+        >
+          <CalendarDays size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
+          <View className="mt-3 gap-0.5">
+            <Text className="font-sans-semibold text-sm">Meal Plan</Text>
+            <Text className="text-[11.5px] text-faint">Plan your nights</Text>
+          </View>
+        </Pressable>
+
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Create a recipe"
@@ -199,7 +151,7 @@ export default function HomeScreen() {
           <Sparkles size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
           <View className="mt-3 gap-0.5">
             <Text className="font-sans-semibold text-sm">Create</Text>
-            <Text className="text-[11.5px] text-faint">AI recipe</Text>
+            <Text className="text-[11.5px] text-faint">Cook right now</Text>
           </View>
         </Pressable>
 
@@ -219,45 +171,47 @@ export default function HomeScreen() {
           </View>
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Find a recipe"
-          onPress={() => {
-            tapHaptic();
-            router.push("/recipes");
-          }}
-          className="min-h-[104px] w-[48.5%] items-start justify-between rounded-xl border border-border bg-card p-3.5 active:opacity-80"
-        >
-          <Search size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
-          <View className="mt-3 gap-0.5">
-            <Text className="font-sans-semibold text-sm">Find</Text>
-            {recipeCount.data === undefined ? (
-              <Skeleton className="mt-1 h-3 w-10" />
-            ) : (
-              <Text className="text-[11.5px] text-faint">{recipeCount.data} saved</Text>
-            )}
-          </View>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Grocery list"
-          onPress={() => {
-            tapHaptic();
-            router.push("/list");
-          }}
-          className="min-h-[104px] w-[48.5%] items-start justify-between rounded-xl border border-border bg-card p-3.5 active:opacity-80"
-        >
-          <ShoppingCart size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
-          <View className="mt-3 gap-0.5">
-            <Text className="font-sans-semibold text-sm">Grocery</Text>
-            <View className="mt-0.5 self-start rounded-full border border-[#22c55e]/35 bg-[#22c55e]/10 px-2 py-0.5">
-              <Text className="font-sans-bold text-[11px] text-[#4ade80]">
-                {groceryCount.data === undefined ? "·" : groceryCount.data}
-              </Text>
+        {hasPendingGrocery ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Grocery list"
+            onPress={() => {
+              tapHaptic();
+              router.push("/list");
+            }}
+            className="min-h-[104px] w-[48.5%] items-start justify-between rounded-xl border border-border bg-card p-3.5 active:opacity-80"
+          >
+            <ShoppingCart size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
+            <View className="mt-3 gap-0.5">
+              <Text className="font-sans-semibold text-sm">Grocery</Text>
+              <View className="mt-0.5 self-start rounded-full border border-[#22c55e]/35 bg-[#22c55e]/10 px-2 py-0.5">
+                <Text className="font-sans-bold text-[11px] text-[#4ade80]">
+                  {groceryCount.data}
+                </Text>
+              </View>
             </View>
-          </View>
-        </Pressable>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Find a recipe"
+            onPress={() => {
+              tapHaptic();
+              router.push("/recipes");
+            }}
+            className="min-h-[104px] w-[48.5%] items-start justify-between rounded-xl border border-border bg-card p-3.5 active:opacity-80"
+          >
+            <Search size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
+            <View className="mt-3 gap-0.5">
+              <Text className="font-sans-semibold text-sm">Find</Text>
+              {recipeCount.data === undefined ? (
+                <Skeleton className="mt-1 h-3 w-10" />
+              ) : (
+                <Text className="text-[11.5px] text-faint">{recipeCount.data} saved</Text>
+              )}
+            </View>
+          </Pressable>
+        )}
       </View>
     </ScrollView>
   );
