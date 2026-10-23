@@ -84,6 +84,8 @@ class WizardSession:
 
     @property
     def idea_target_count(self) -> int:
+        if self.day_count == 1:
+            return 3
         return self.day_count + 5
 
 

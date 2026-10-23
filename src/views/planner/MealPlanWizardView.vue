@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import SingleNightPrefsFields from "@/components/planner/SingleNightPrefsFields.vue";
 import WizardPrefsFields from "@/components/planner/WizardPrefsFields.vue";
 import WizardProgressPanel from "@/components/planner/WizardProgressPanel.vue";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useMealPlanWizardPrefs } from "@/composables/useMealPlanWizardPrefs";
@@ -10,246 +21,81 @@ import {
   addDays,
   endOfDay,
   formatPrepTime,
+  mediaUrl,
   startOfDay,
   startOfWeekMonday,
   toDateKey
 } from "@/lib/media";
 import { paths } from "@/sitemap";
 import { usePlannerStore } from "@/stores/planner";
+import { useRecipesStore } from "@/stores/recipes";
 import { syncAfterPlanMutation, syncAfterRecipeMutation } from "@/stores/sync";
 import {
   emptyWizardPrefs,
   type MealPlanWizardBuiltRecipe,
+  type MealPlanWizardNightCommitItem,
+  type MealPlanWizardPrefs,
   type MealPlanWizardProgressEvent,
   type MealPlanWizardSession,
-  type MealPlanWizardStep
+  type MealPlanWizardStep,
+  type RecipeCard,
+  type RecipeDetail
 } from "@/types";
 import { get, getErrorMessage, patch, post, postSse, toast } from "@/utils";
-import { ArrowLeft, Check, ChevronDown, LoaderCircle, RefreshCw, Sparkles } from "@lucide/vue";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import {
+  ArrowLeft,
+  Camera,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Link2,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Trash2
+} from "@lucide/vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
 const router = useRouter();
 const plannerStore = usePlannerStore();
+const recipesStore = useRecipesStore();
 const { prefs: savedPrefs, save: persistPrefs } = useMealPlanWizardPrefs();
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-/** Days offered when optionally assigning a created recipe to a night. */
 const ASSIGN_DAY_COUNT = 14;
 
-type UiStep = "days" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type UiStep = "days" | "hub" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type FlowContext = "week-fill" | "single-night" | "standalone-recipe";
 type InputMode = "structured" | "simple";
 
-/** Ad-hoc create from Home / + menu — one recipe; day assign is optional at the end. */
+interface DraftNightEntry {
+  kind: "generated" | "existing" | "imported";
+  title: string;
+  description?: string;
+  prep_time?: number | null;
+  cover_url?: string | null;
+  recipeId?: number | null;
+  builtRecipe?: MealPlanWizardBuiltRecipe | null;
+}
+
 const recipeMode = computed(() => route.query.mode === "recipe");
-
-const uiStep = ref<UiStep>("days");
-/** Structured week form vs single free-text prompt (like AI edit). */
-const inputMode = ref<InputMode>(recipeMode.value ? "simple" : "structured");
-const simplePrompt = ref("");
-const session = ref<MealPlanWizardSession | null>(null);
-const localPrefs = ref(emptyWizardPrefs());
-const selectedDays = ref<string[]>([]);
-const selectedIdeaIds = ref<string[]>([]);
-const liveEvents = ref<MealPlanWizardProgressEvent[]>([]);
-const running = ref(false);
-const error = ref("");
-const refineText = ref("");
-const busy = ref(false);
-const loadingDays = ref(true);
-/** Existing dinner titles keyed by YYYY-MM-DD for this week. */
-const plannedTitles = ref<Record<string, string>>({});
-/** Day keys expanded on the review screen. */
-const expandedDays = ref<string[]>([]);
-/** Idea ids marked for regeneration on refine. */
-const regenIdeaIds = ref<string[]>([]);
-/** Optional night to plan after creating a single recipe (recipeMode only). */
-const assignDayKey = ref<string | null>(null);
-const assignPlansByKey = ref<Record<string, string>>({});
-const loadingAssignDays = ref(false);
-let abortController: AbortController | null = null;
-
 const today = startOfDay();
-/** The single week this wizard session is scoped to (always 7 days). */
-const weekDays = ref<Date[]>(
-  Array.from({ length: 7 }, (_, i) => addDays(startOfWeekMonday(today), i))
-);
-
-const weekDayKeys = computed(() => weekDays.value.map(toDateKey));
-const weekKeySet = computed(() => new Set(weekDayKeys.value));
-
-const selectCount = computed(() => session.value?.select_count ?? selectedDays.value.length);
-
-const canContinueDays = computed(() => selectedDays.value.length > 0);
-
-const skippedCount = computed(() => weekDayKeys.value.length - selectedDays.value.length);
-
 const todayKey = computed(() => toDateKey(today));
-
-function isDayPast(dayOrKey: Date | string): boolean {
-  const key = typeof dayOrKey === "string" ? dayOrKey : toDateKey(dayOrKey);
-  return key < todayKey.value;
-}
-
-const openNightKeys = computed(() =>
-  weekDayKeys.value.filter((key) => !plannedTitles.value[key] && !isDayPast(key))
-);
-
-const alreadyPlannedCount = computed(() => Object.keys(plannedTitles.value).length);
-
-/** Readonly day → recipe pairs in plan order (no reassignment). */
-const planRows = computed(() => {
-  const days = session.value?.days ?? [];
-  const recipes = session.value?.built_recipes ?? [];
-  return days.map((day, i) => ({
-    day,
-    recipe: recipes[i] ?? null
-  }));
-});
-
-const canRefineRecipes = computed(
-  () => Boolean(refineText.value.trim()) && regenIdeaIds.value.length > 0 && !busy.value
-);
-
-const weekHeading = computed(() => {
-  const start = weekDays.value[0];
-  if (!start) return "This week";
-  const thisWeek = startOfWeekMonday(today);
-  const nextWeek = addDays(thisWeek, 7);
-  if (toDateKey(start) === toDateKey(thisWeek)) return "This week";
-  if (toDateKey(start) === toDateKey(nextWeek)) return "Next week";
-  const end = weekDays.value[6] ?? start;
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  return `${start.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`;
-});
-
-const canContinueSelect = computed(
-  () => selectedIdeaIds.value.length === selectCount.value && selectCount.value > 0
-);
-
-const selectionFull = computed(
-  () => selectedIdeaIds.value.length >= selectCount.value && selectCount.value > 0
-);
-
-function isIdeaSelected(id: string) {
-  return selectedIdeaIds.value.includes(id);
-}
-
-function isIdeaDisabled(id: string) {
-  // Once the quota is filled, lock unselected ideas so it's obvious you're done.
-  // Selected ones stay clickable so the user can swap.
-  return selectionFull.value && !isIdeaSelected(id);
-}
-
-const STEP_ORDER = computed<UiStep[]>(() => {
-  if (inputMode.value === "simple") {
-    return recipeMode.value
-      ? ["prefs", "build", "review", "assign"]
-      : ["days", "prefs", "build", "review"];
-  }
-  return recipeMode.value
-    ? ["prefs", "ideate", "select", "build", "review", "assign"]
-    : ["days", "prefs", "ideate", "select", "build", "review"];
-});
-
-const canContinueSimple = computed(() => Boolean(simplePrompt.value.trim()) && !busy.value);
-
-const stepIndex = computed(() => STEP_ORDER.value.indexOf(uiStep.value));
-
-const assignDays = computed(() =>
-  Array.from({ length: ASSIGN_DAY_COUNT }, (_, i) => {
-    const date = addDays(today, i);
-    const key = toDateKey(date);
-    return {
-      date,
-      key,
-      label:
-        i === 0
-          ? "Tonight"
-          : i === 1
-            ? "Tomorrow"
-            : date.toLocaleDateString(undefined, { weekday: "long" }),
-      dateLabel: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      plannedTitle: assignPlansByKey.value[key] ?? null
-    };
-  })
-);
-
-const recipeTitle = computed(() => session.value?.built_recipes[0]?.title?.trim() || "your recipe");
-
-function previousStep(step: UiStep): UiStep {
-  if (step === "prefs") return recipeMode.value ? "prefs" : "days";
-  if (step === "ideate") return "prefs";
-  if (step === "select") return "prefs";
-  if (step === "build") return inputMode.value === "simple" ? "prefs" : "select";
-  if (step === "review") return inputMode.value === "simple" ? "prefs" : "select";
-  if (step === "assign") return "review";
-  return recipeMode.value ? "prefs" : "days";
-}
-
-async function leaveWizard() {
-  router.push(recipeMode.value ? paths.recipes : paths.planner);
-}
-
-async function goBack() {
-  if (uiStep.value === "days" || (recipeMode.value && uiStep.value === "prefs")) {
-    await leaveWizard();
-    return;
-  }
-  // Assign is client-only (after review) — just return without rewinding the session.
-  if (uiStep.value === "assign") {
-    uiStep.value = "review";
-    return;
-  }
-  const target = previousStep(uiStep.value);
-  // Transitional pipeline screens: abandon in-flight work and return.
-  abortController?.abort();
-  running.value = false;
-  await rewindTo(target);
-}
-
-const headerTitle = computed(() => {
-  if (recipeMode.value) {
-    switch (uiStep.value) {
-      case "prefs":
-        return inputMode.value === "simple" ? "Describe your recipe" : "What are you craving?";
-      case "ideate":
-        return "Cooking up ideas";
-      case "select":
-        return "Pick one idea";
-      case "build":
-        return "Building your recipe";
-      case "review":
-        return "Review your recipe";
-      case "assign":
-        return "Add to a night?";
-      default:
-        return "Create a recipe";
-    }
-  }
-  switch (uiStep.value) {
-    case "days":
-      return "Which nights?";
-    case "prefs":
-      return inputMode.value === "simple" ? "Describe your dinners" : "Set the vibe";
-    case "ideate":
-      return "Cooking up ideas";
-    case "select":
-      return "Pick your dinners";
-    case "build":
-      return "Building recipes";
-    case "review":
-      return "Lock the plan";
-    default:
-      return "Plan meals";
-  }
-});
+const thisWeekStart = startOfWeekMonday(today);
 
 function parseDateKey(key: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
   const [y, m, d] = key.split("-").map(Number);
   return startOfDay(new Date(y, m - 1, d));
+}
+
+function isDayPast(dayOrKey: Date | string): boolean {
+  const key = typeof dayOrKey === "string" ? dayOrKey : toDateKey(dayOrKey);
+  return key < todayKey.value;
 }
 
 function parseDaysFromQuery(): string[] {
@@ -261,41 +107,138 @@ function parseDaysFromQuery(): string[] {
     .filter((s) => Boolean(parseDateKey(s)));
 }
 
-function weekFromSeed(seed: Date): Date[] {
-  const start = startOfWeekMonday(seed);
-  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
-}
-
-function clampDaysToWeek(keys: string[], weekKeys: string[]): string[] {
-  const allowed = new Set(weekKeys);
-  return [...new Set(keys.filter((k) => allowed.has(k) && !isDayPast(k)))].sort();
-}
-
-function isDaySelected(key: string) {
-  return selectedDays.value.includes(key);
-}
-
-function plannedTitleFor(key: string): string | null {
-  return plannedTitles.value[key] ?? null;
-}
-
-function toggleDay(key: string) {
-  // Only the 7 nights in this wizard's week can be toggled; past days stay locked.
-  if (!weekKeySet.value.has(key) || isDayPast(key)) return;
-  if (isDaySelected(key)) {
-    selectedDays.value = selectedDays.value.filter((d) => d !== key);
-  } else {
-    selectedDays.value = clampDaysToWeek([...selectedDays.value, key], weekDayKeys.value);
+function requiredWeekCountForDays(dayKeys: string[]): number {
+  let maxWeeks = 2;
+  for (const key of dayKeys) {
+    const d = parseDateKey(key);
+    if (!d) continue;
+    const diffDays = Math.floor(
+      (startOfDay(d).getTime() - thisWeekStart.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    if (diffDays >= 0) {
+      const needed = Math.floor(diffDays / 7) + 1;
+      if (needed > maxWeeks) maxWeeks = needed;
+    }
   }
+  return maxWeeks;
 }
 
-function selectAllOpenNights() {
-  selectedDays.value = [...openNightKeys.value];
+function formatWeekLabel(weekStart: Date): string {
+  const nextWeek = addDays(thisWeekStart, 7);
+  if (toDateKey(weekStart) === toDateKey(thisWeekStart)) return "This week";
+  if (toDateKey(weekStart) === toDateKey(nextWeek)) return "Next week";
+  const end = addDays(weekStart, 6);
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  return `${weekStart.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`;
 }
 
-function clearWeekDays() {
-  selectedDays.value = [];
-}
+const weekCount = ref(recipeMode.value ? 2 : requiredWeekCountForDays(parseDaysFromQuery()));
+
+const weeks = computed(() =>
+  Array.from({ length: weekCount.value }, (_, weekIndex) => {
+    const weekStart = addDays(thisWeekStart, weekIndex * 7);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    return {
+      weekIndex,
+      weekStart,
+      label: formatWeekLabel(weekStart),
+      days,
+      dayKeys: days.map(toDateKey)
+    };
+  })
+);
+
+const uiStep = ref<UiStep>(recipeMode.value ? "prefs" : "days");
+const flowContext = ref<FlowContext>(recipeMode.value ? "standalone-recipe" : "week-fill");
+const activeNightKey = ref<string | null>(null);
+const fillTargetDays = ref<string[]>([]);
+
+const inputMode = ref<InputMode>("simple");
+const simplePrompt = ref("");
+const localPrefs = ref<MealPlanWizardPrefs>(emptyWizardPrefs());
+const singleNightPrefs = ref<MealPlanWizardPrefs>(emptyWizardPrefs());
+
+const selectedDays = ref<string[]>([]);
+/** Persistent night draft recipes across wizard steps — never wiped on Back. */
+const draftByDay = ref<Record<string, DraftNightEntry>>({});
+const expandedHubDays = ref<string[]>([]);
+
+const session = ref<MealPlanWizardSession | null>(null);
+const selectedIdeaIds = ref<string[]>([]);
+const liveEvents = ref<MealPlanWizardProgressEvent[]>([]);
+const running = ref(false);
+const error = ref("");
+const refineText = ref("");
+const busy = ref(false);
+const loadingDays = ref(true);
+const plannedTitles = ref<Record<string, string>>({});
+const expandedDays = ref<string[]>([]);
+const regenIdeaIds = ref<string[]>([]);
+
+// ---- Night action menu, Find existing dialog, Import dialog ----
+const menuNightKey = ref<string | null>(null);
+const menuDialogOpen = computed({
+  get: () => menuNightKey.value !== null,
+  set: (v: boolean) => {
+    if (!v) menuNightKey.value = null;
+  }
+});
+
+const findDialogOpen = ref(false);
+const findSearchText = ref("");
+const findSearchResults = ref<RecipeCard[] | null>(null);
+const findSearching = ref(false);
+const findLoadingList = ref(false);
+
+const importDialogOpen = ref(false);
+const importMethod = ref<"link" | "photo">("link");
+const importUrl = ref("");
+const importing = ref(false);
+const importError = ref("");
+
+// ---- Standalone recipeMode assign step ----
+const assignDayKey = ref<string | null>(null);
+const assignPlansByKey = ref<Record<string, string>>({});
+const loadingAssignDays = ref(false);
+
+// ---- Infinite scroll sentinel ----
+const sentinelRef = ref<HTMLElement | null>(null);
+let observer: IntersectionObserver | null = null;
+let abortController: AbortController | null = null;
+
+const canContinueDays = computed(() => selectedDays.value.length > 0);
+const plannedSelectedCount = computed(
+  () => selectedDays.value.filter((d) => Boolean(draftByDay.value[d])).length
+);
+const openSelectedDays = computed(() => selectedDays.value.filter((d) => !draftByDay.value[d]));
+
+const isSingleNightFlow = computed(
+  () => flowContext.value === "single-night" || flowContext.value === "standalone-recipe"
+);
+
+const activeGenerationDays = computed(() => {
+  if (flowContext.value === "standalone-recipe") return [todayKey.value];
+  if (flowContext.value === "single-night") {
+    return activeNightKey.value ? [activeNightKey.value] : [todayKey.value];
+  }
+  return fillTargetDays.value.length ? fillTargetDays.value : selectedDays.value;
+});
+
+const selectCount = computed(
+  () => session.value?.select_count ?? activeGenerationDays.value.length
+);
+const selectionFull = computed(
+  () => selectedIdeaIds.value.length >= selectCount.value && selectCount.value > 0
+);
+const canContinueSelect = computed(
+  () => selectedIdeaIds.value.length === selectCount.value && selectCount.value > 0
+);
+const canStartIdeate = computed(() =>
+  inputMode.value === "simple" ? Boolean(simplePrompt.value.trim()) && !busy.value : !busy.value
+);
+const canRefineRecipes = computed(
+  () => Boolean(refineText.value.trim()) && regenIdeaIds.value.length > 0 && !busy.value
+);
 
 function dayLabel(key: string) {
   const date = parseDateKey(key);
@@ -303,60 +246,294 @@ function dayLabel(key: string) {
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-async function loadPlannedForWeek(days: Date[]): Promise<Record<string, string>> {
-  if (!days.length) return {};
-  const start = startOfDay(days[0]!);
-  const end = days[days.length - 1]!;
-  try {
-    await plannerStore.ensureRange(start, end);
-    const titles: Record<string, string> = {};
-    for (const plan of plannerStore.plansInRange(start, end)) {
-      const key = plan.planned_for.slice(0, 10);
-      // Keep the first dinner title if multiple are planned that day.
-      if (!titles[key]) titles[key] = plan.recipe.name;
-    }
-    return titles;
-  } catch (er) {
-    console.error(er);
-    toast.fromError(er, "Couldn’t load existing dinners for this week.");
-    return {};
+function dayFullLabel(key: string | null) {
+  if (!key) return "";
+  const date = parseDateKey(key);
+  if (!date) return key;
+  return date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+const headerEyebrow = computed(() => {
+  if (recipeMode.value) return "Create";
+  if (uiStep.value === "days" || uiStep.value === "hub") return "Meal plan";
+  if (flowContext.value === "single-night" && activeNightKey.value) {
+    return dayLabel(activeNightKey.value);
+  }
+  return "Fill plan";
+});
+
+const headerTitle = computed(() => {
+  switch (uiStep.value) {
+    case "days":
+      return "Which nights?";
+    case "hub":
+      return "Plan your nights";
+    case "prefs":
+      if (isSingleNightFlow.value) {
+        return inputMode.value === "simple" ? "Describe your dinner" : "Dinner details";
+      }
+      return inputMode.value === "simple" ? "Describe your dinners" : "Set the vibe";
+    case "ideate":
+      return "Cooking up ideas";
+    case "select":
+      return isSingleNightFlow.value ? "Pick 1 of 3 options" : "Pick your dinners";
+    case "build":
+      return isSingleNightFlow.value ? "Building your recipe" : "Building recipes";
+    case "review":
+      return "Review your recipe";
+    case "assign":
+      return "Add to a night?";
+    default:
+      return "Plan meals";
+  }
+});
+
+// ---- Step 1: Days helpers ----
+function isDaySelected(key: string) {
+  return selectedDays.value.includes(key);
+}
+
+function toggleDay(key: string) {
+  if (isDayPast(key)) return;
+  if (isDaySelected(key)) {
+    selectedDays.value = selectedDays.value.filter((d) => d !== key);
+  } else {
+    selectedDays.value = [...new Set([...selectedDays.value, key])].sort();
   }
 }
 
-function planningDays(): string[] {
-  return clampDaysToWeek(selectedDays.value, weekDayKeys.value);
+function selectWeekOpen(dayKeys: string[]) {
+  const open = dayKeys.filter((k) => !plannedTitles.value[k] && !isDayPast(k));
+  selectedDays.value = [...new Set([...selectedDays.value, ...open])].sort();
 }
 
-async function ensureSession(): Promise<MealPlanWizardSession> {
-  if (session.value) return session.value;
-  const created = await post<MealPlanWizardSession>("/meal-plan-wizard/sessions/", {
-    days: planningDays(),
-    prefs: localPrefs.value
-  });
-  session.value = created;
-  return created;
+function clearWeekDays(dayKeys: string[]) {
+  const removeSet = new Set(dayKeys);
+  selectedDays.value = selectedDays.value.filter((k) => !removeSet.has(k));
 }
 
-async function syncDaysAndPrefs() {
-  // Keep selection strictly inside this week's 7 nights before talking to the API.
-  selectedDays.value = planningDays();
-  persistPrefs(localPrefs.value);
-  const s = await ensureSession();
-  const [daysRes, prefsRes] = await Promise.all([
-    patch<MealPlanWizardSession>(`/meal-plan-wizard/sessions/${s.id}/days/`, {
-      days: selectedDays.value
-    }),
-    patch<MealPlanWizardSession>(`/meal-plan-wizard/sessions/${s.id}/prefs/`, localPrefs.value)
-  ]);
-  session.value = prefsRes ?? daysRes;
-  selectedIdeaIds.value = session.value.selected_idea_ids;
+function loadAnotherWeek() {
+  weekCount.value += 1;
 }
 
-function goForwardFromDays() {
-  if (!canContinueDays.value) return;
+async function loadPlannedForLoadedWeeks() {
+  const firstDay = weeks.value[0]?.days[0];
+  const lastWeek = weeks.value[weeks.value.length - 1];
+  const lastDay = lastWeek?.days[6];
+  if (!firstDay || !lastDay) return;
+  try {
+    await plannerStore.ensureRange(firstDay, endOfDay(lastDay));
+    const titles: Record<string, string> = {};
+    for (const plan of plannerStore.plansInRange(firstDay, endOfDay(lastDay))) {
+      const key = plan.planned_for.slice(0, 10);
+      if (!titles[key]) titles[key] = plan.recipe.name;
+    }
+    plannedTitles.value = { ...plannedTitles.value, ...titles };
+  } catch (er) {
+    console.error(er);
+    toast.fromError(er, "Couldn’t load existing dinners.");
+  }
+}
+
+watch(weekCount, () => {
+  if (!recipeMode.value) {
+    void loadPlannedForLoadedWeeks();
+  }
+});
+
+// ---- Hub actions ----
+function openNightMenu(dayKey: string) {
+  menuNightKey.value = dayKey;
+}
+
+function toggleHubExpand(dayKey: string) {
+  if (expandedHubDays.value.includes(dayKey)) {
+    expandedHubDays.value = expandedHubDays.value.filter((k) => k !== dayKey);
+  } else {
+    expandedHubDays.value = [...expandedHubDays.value, dayKey];
+  }
+}
+
+function startSingleNightGenerate(dayKey: string) {
+  menuNightKey.value = null;
   error.value = "";
-  // Days → prefs is local; the server session is created when ideation starts.
+  activeNightKey.value = dayKey;
+  flowContext.value = "single-night";
+  inputMode.value = "simple";
+  simplePrompt.value = "";
+  singleNightPrefs.value = {
+    ...emptyWizardPrefs(),
+    dietary_restrictions: savedPrefs.value.dietary_restrictions,
+    servings: savedPrefs.value.servings
+  };
+  session.value = null;
+  selectedIdeaIds.value = [];
   uiStep.value = "prefs";
+}
+
+async function startFindForNight(dayKey: string) {
+  menuNightKey.value = null;
+  activeNightKey.value = dayKey;
+  findSearchText.value = "";
+  findSearchResults.value = null;
+  findDialogOpen.value = true;
+  if (!recipesStore.loaded) {
+    findLoadingList.value = true;
+    try {
+      await recipesStore.ensureLoaded();
+    } finally {
+      findLoadingList.value = false;
+    }
+  }
+}
+
+const findDisplayList = computed(() => {
+  if (findSearchResults.value) return findSearchResults.value;
+  return recipesStore.sorted;
+});
+
+let findDebounce: ReturnType<typeof setTimeout> | undefined;
+watch(findSearchText, () => {
+  clearTimeout(findDebounce);
+  findDebounce = setTimeout(async () => {
+    const q = findSearchText.value.trim();
+    if (!q) {
+      findSearchResults.value = null;
+      findSearching.value = false;
+      return;
+    }
+    findSearching.value = true;
+    try {
+      findSearchResults.value = await recipesStore.search(q);
+    } catch (er) {
+      toast.fromError(er, "Couldn’t search recipes.");
+    } finally {
+      findSearching.value = false;
+    }
+  }, 280);
+});
+
+function pickExistingRecipeForNight(recipe: RecipeCard) {
+  const dayKey = activeNightKey.value;
+  if (!dayKey) return;
+  draftByDay.value = {
+    ...draftByDay.value,
+    [dayKey]: {
+      kind: "existing",
+      title: recipe.name,
+      description: recipe.description,
+      prep_time: recipe.prep_time ?? null,
+      cover_url: recipe.cover_image?.url ?? null,
+      recipeId: recipe.id,
+      builtRecipe: null
+    }
+  };
+  findDialogOpen.value = false;
+  toast.success(`Added to ${dayLabel(dayKey)}.`);
+}
+
+function startImportForNight(dayKey: string) {
+  menuNightKey.value = null;
+  activeNightKey.value = dayKey;
+  importMethod.value = "link";
+  importUrl.value = "";
+  importError.value = "";
+  importDialogOpen.value = true;
+}
+
+async function handleImportForNight() {
+  const dayKey = activeNightKey.value;
+  if (!dayKey || !importUrl.value.trim() || importing.value) return;
+  importing.value = true;
+  importError.value = "";
+  try {
+    const recipe = await post<RecipeDetail>("/recipe/import-from-url/", {
+      url: importUrl.value.trim()
+    });
+    syncAfterRecipeMutation();
+    draftByDay.value = {
+      ...draftByDay.value,
+      [dayKey]: {
+        kind: "imported",
+        title: recipe.name,
+        description: recipe.description,
+        prep_time: recipe.prep_time ?? null,
+        cover_url: recipe.cover_image?.url ?? null,
+        recipeId: recipe.id,
+        builtRecipe: null
+      }
+    };
+    importDialogOpen.value = false;
+    toast.success(`Imported “${recipe.name}” for ${dayLabel(dayKey)}.`);
+  } catch (er) {
+    importError.value = getErrorMessage(er, "Couldn’t import that recipe.");
+    toast.fromError(er, "Couldn’t import that recipe.");
+  } finally {
+    importing.value = false;
+  }
+}
+
+function removeNightDraft(dayKey: string) {
+  menuNightKey.value = null;
+  const next = { ...draftByDay.value };
+  delete next[dayKey];
+  draftByDay.value = next;
+}
+
+function startFillWeekFlow() {
+  error.value = "";
+  const targets = openSelectedDays.value.length ? openSelectedDays.value : selectedDays.value;
+  fillTargetDays.value = [...targets];
+  activeNightKey.value = null;
+  flowContext.value = "week-fill";
+  inputMode.value = "structured";
+  simplePrompt.value = "";
+  session.value = null;
+  selectedIdeaIds.value = [];
+  uiStep.value = "prefs";
+}
+
+// ---- LLM Session Plumbing ----
+function effectivePrefsForSession(): MealPlanWizardPrefs {
+  if (inputMode.value === "simple") {
+    const text = simplePrompt.value.trim();
+    return {
+      ...emptyWizardPrefs(),
+      goals: text,
+      extra_notes: text
+    };
+  }
+  if (isSingleNightFlow.value) {
+    return singleNightPrefs.value;
+  }
+  return localPrefs.value;
+}
+
+async function syncGenerationSession(): Promise<MealPlanWizardSession> {
+  const days = activeGenerationDays.value;
+  const prefsToUse = effectivePrefsForSession();
+  if (!isSingleNightFlow.value && inputMode.value === "structured") {
+    persistPrefs(localPrefs.value);
+  }
+  if (!session.value) {
+    session.value = await post<MealPlanWizardSession>("/meal-plan-wizard/sessions/", {
+      days,
+      prefs: prefsToUse
+    });
+  } else {
+    const [daysRes, prefsRes] = await Promise.all([
+      patch<MealPlanWizardSession>(`/meal-plan-wizard/sessions/${session.value.id}/days/`, {
+        days
+      }),
+      patch<MealPlanWizardSession>(
+        `/meal-plan-wizard/sessions/${session.value.id}/prefs/`,
+        prefsToUse
+      )
+    ]);
+    session.value = prefsRes ?? daysRes;
+  }
+  selectedIdeaIds.value = session.value.selected_idea_ids;
+  return session.value;
 }
 
 async function refreshSession() {
@@ -366,9 +543,8 @@ async function refreshSession() {
   );
 }
 
-async function runFreeformBuild(refinement?: string, ideaIds?: string[]) {
-  const prompt = simplePrompt.value.trim();
-  if (!prompt && !refinement) {
+async function runIdeate(refinement?: string) {
+  if (inputMode.value === "simple" && !simplePrompt.value.trim() && !refinement) {
     error.value = "Describe what you’d like to cook.";
     return;
   }
@@ -376,50 +552,9 @@ async function runFreeformBuild(refinement?: string, ideaIds?: string[]) {
   busy.value = true;
   running.value = true;
   liveEvents.value = [];
-  uiStep.value = "build";
-  try {
-    await syncDaysAndPrefs();
-    const s = session.value!;
-    abortController?.abort();
-    abortController = new AbortController();
-    await postSse<MealPlanWizardProgressEvent>(
-      `/meal-plan-wizard/sessions/${s.id}/build-freeform/`,
-      {
-        prompt,
-        refinement: refinement || null,
-        idea_ids: ideaIds?.length ? ideaIds : null
-      },
-      (event) => {
-        if (event.status === "done") return;
-        liveEvents.value = [...liveEvents.value, event];
-        if (event.status === "error") error.value = event.message;
-      },
-      abortController.signal
-    );
-    await refreshSession();
-    refineText.value = "";
-    regenIdeaIds.value = [];
-    if (!error.value) uiStep.value = "review";
-  } catch (e) {
-    if ((e as Error).name !== "AbortError") {
-      error.value = getErrorMessage(e, "Build failed");
-      toast.fromError(e, "Build failed");
-    }
-  } finally {
-    running.value = false;
-    busy.value = false;
-  }
-}
-
-async function runIdeate(refinement?: string) {
-  error.value = "";
-  busy.value = true;
-  running.value = true;
-  liveEvents.value = [];
   uiStep.value = "ideate";
   try {
-    await syncDaysAndPrefs();
-    const s = session.value!;
+    const s = await syncGenerationSession();
     abortController?.abort();
     abortController = new AbortController();
     await postSse<MealPlanWizardProgressEvent>(
@@ -447,7 +582,49 @@ async function runIdeate(refinement?: string) {
   }
 }
 
+function applyBuiltToHubAndReturn() {
+  const current = session.value;
+  if (!current) return;
+  const days = current.days ?? [];
+  const recipes = current.built_recipes ?? [];
+  const next = { ...draftByDay.value };
+  days.forEach((day, idx) => {
+    const built = recipes[idx];
+    if (built) {
+      next[day] = {
+        kind: "generated",
+        title: built.title || "Untitled dinner",
+        description: built.description,
+        prep_time: built.prep_time ?? null,
+        cover_url: null,
+        recipeId: built.created_recipe_id ?? built.existing_recipe_id ?? null,
+        builtRecipe: built
+      };
+    }
+  });
+  draftByDay.value = next;
+  uiStep.value = "hub";
+  if (flowContext.value === "single-night" && activeNightKey.value) {
+    toast.success(`Recipe ready for ${dayLabel(activeNightKey.value)}.`);
+  } else {
+    toast.success(`Filled ${recipes.length} night${recipes.length === 1 ? "" : "s"}.`);
+  }
+}
+
+function isIdeaSelected(id: string) {
+  return selectedIdeaIds.value.includes(id);
+}
+
+function isIdeaDisabled(id: string) {
+  if (selectCount.value === 1) return false;
+  return selectionFull.value && !isIdeaSelected(id);
+}
+
 function toggleIdea(id: string) {
+  if (selectCount.value === 1) {
+    selectedIdeaIds.value = isIdeaSelected(id) ? [] : [id];
+    return;
+  }
   if (isIdeaDisabled(id)) return;
   if (isIdeaSelected(id)) {
     selectedIdeaIds.value = selectedIdeaIds.value.filter((x) => x !== id);
@@ -463,11 +640,13 @@ async function confirmSelectionAndBuild(refinement?: string) {
   error.value = "";
   busy.value = true;
   try {
-    // Allow prefs edits on select step to apply (drops future if changed)
-    persistPrefs(localPrefs.value);
+    const prefsToUse = effectivePrefsForSession();
+    if (!isSingleNightFlow.value && inputMode.value === "structured") {
+      persistPrefs(localPrefs.value);
+    }
     const afterPrefs = await patch<MealPlanWizardSession>(
       `/meal-plan-wizard/sessions/${current.id}/prefs/`,
-      localPrefs.value
+      prefsToUse
     );
     session.value = afterPrefs;
     if (!afterPrefs.ideas.length) {
@@ -512,7 +691,13 @@ async function runBuild(refinement?: string, ideaIds?: string[]) {
     await refreshSession();
     refineText.value = "";
     regenIdeaIds.value = [];
-    if (!error.value) uiStep.value = "review";
+    if (!error.value) {
+      if (flowContext.value === "standalone-recipe") {
+        uiStep.value = "review";
+      } else {
+        applyBuiltToHubAndReturn();
+      }
+    }
   } catch (e) {
     if ((e as Error).name !== "AbortError") {
       error.value = getErrorMessage(e, "Build failed");
@@ -534,13 +719,141 @@ async function applyRefinement() {
       error.value = "Mark at least one dinner to regenerate.";
       return;
     }
-    if (inputMode.value === "simple") {
-      await runFreeformBuild(text, [...regenIdeaIds.value]);
-    } else {
-      await runBuild(text, [...regenIdeaIds.value]);
-    }
+    await runBuild(text, [...regenIdeaIds.value]);
   }
 }
+
+async function rewindTo(step: UiStep) {
+  if (!session.value) {
+    uiStep.value = step;
+    return;
+  }
+  if (step === "prefs") {
+    if (session.value.ideas.length || session.value.built_recipes.length) {
+      try {
+        session.value = await post(`/meal-plan-wizard/sessions/${session.value.id}/rewind/`, {
+          to_step: "prefs"
+        });
+      } catch (e) {
+        toast.fromError(e, "Couldn’t reset the wizard step.");
+      }
+    }
+    selectedIdeaIds.value = [];
+    liveEvents.value = [];
+    uiStep.value = "prefs";
+    return;
+  }
+  try {
+    const rewound = await post<MealPlanWizardSession>(
+      `/meal-plan-wizard/sessions/${session.value.id}/rewind/`,
+      { to_step: step as MealPlanWizardStep }
+    );
+    session.value = rewound;
+    selectedIdeaIds.value = rewound.selected_idea_ids;
+    uiStep.value = step;
+  } catch (e) {
+    error.value = getErrorMessage(e, "Could not go back");
+    toast.fromError(e, "Could not go back");
+  }
+}
+
+async function leaveWizard() {
+  await router.push(recipeMode.value ? paths.recipes : paths.planner);
+}
+
+async function goBack() {
+  error.value = "";
+  if (uiStep.value === "days" || (recipeMode.value && uiStep.value === "prefs")) {
+    await leaveWizard();
+    return;
+  }
+  if (uiStep.value === "hub") {
+    // Non-destructive Back to night selection: keep draftByDay intact!
+    uiStep.value = "days";
+    return;
+  }
+  if (uiStep.value === "prefs") {
+    uiStep.value = "hub";
+    return;
+  }
+  if (uiStep.value === "assign") {
+    uiStep.value = "review";
+    return;
+  }
+  abortController?.abort();
+  running.value = false;
+  if (uiStep.value === "ideate" || uiStep.value === "select") {
+    await rewindTo("prefs");
+    return;
+  }
+  if (uiStep.value === "build" || uiStep.value === "review") {
+    await rewindTo("select");
+    return;
+  }
+}
+
+async function saveHubPlan() {
+  error.value = "";
+  const sorted = [...new Set(selectedDays.value)].sort();
+  const nights: MealPlanWizardNightCommitItem[] = [];
+  for (const day of sorted) {
+    const entry = draftByDay.value[day];
+    if (!entry) continue;
+    if (entry.recipeId != null) {
+      nights.push({ day, recipe_id: entry.recipeId });
+    } else if (entry.builtRecipe) {
+      nights.push({ day, built_recipe: entry.builtRecipe });
+    }
+  }
+  if (!nights.length) {
+    await router.push(paths.planner);
+    return;
+  }
+  busy.value = true;
+  try {
+    await post("/meal-plan-wizard/commit-plan/", { nights });
+    const hadGenerated = nights.some((n) => Boolean(n.built_recipe));
+    syncAfterPlanMutation({ recipesChanged: hadGenerated });
+    toast.success("Meal plan saved.");
+    await router.push(paths.planner);
+  } catch (e) {
+    error.value = getErrorMessage(e, "Could not save plan");
+    toast.fromError(e, "Could not save plan");
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ---- Standalone recipeMode review & assign ----
+const planRows = computed(() => {
+  const days = session.value?.days ?? [];
+  const recipes = session.value?.built_recipes ?? [];
+  return days.map((day, i) => ({
+    day,
+    recipe: recipes[i] ?? null
+  }));
+});
+
+const assignDays = computed(() =>
+  Array.from({ length: ASSIGN_DAY_COUNT }, (_, i) => {
+    const date = addDays(today, i);
+    const key = toDateKey(date);
+    return {
+      date,
+      key,
+      label:
+        i === 0
+          ? "Tonight"
+          : i === 1
+            ? "Tomorrow"
+            : date.toLocaleDateString(undefined, { weekday: "long" }),
+      dateLabel: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      plannedTitle: assignPlansByKey.value[key] ?? null
+    };
+  })
+);
+
+const recipeTitle = computed(() => session.value?.built_recipes[0]?.title?.trim() || "your recipe");
 
 function toggleExpanded(day: string) {
   if (expandedDays.value.includes(day)) {
@@ -566,58 +879,15 @@ function isMarkedForRegen(ideaId: string) {
   return regenIdeaIds.value.includes(ideaId);
 }
 
-function markAllForRegen() {
-  regenIdeaIds.value = (session.value?.built_recipes ?? []).map((r) => r.idea_id);
-}
-
-function clearRegenMarks() {
-  regenIdeaIds.value = [];
-}
-
 function formatIngredient(ing: MealPlanWizardBuiltRecipe["ingredients"][number]): string {
-  const bits = [
+  return [
     ing.amount != null ? String(ing.amount) : "",
     ing.units || "",
     ing.name,
     ing.details ? `(${ing.details})` : ""
-  ].filter(Boolean);
-  return bits.join(" ");
-}
-
-async function rewindTo(step: UiStep) {
-  if (!session.value) {
-    uiStep.value = step;
-    return;
-  }
-  if (step === "days" || step === "prefs") {
-    // Clear future on server when leaving LLM stages
-    if (session.value.ideas.length || session.value.built_recipes.length) {
-      try {
-        session.value = await post(`/meal-plan-wizard/sessions/${session.value.id}/rewind/`, {
-          to_step: step
-        });
-      } catch (e) {
-        console.error(e);
-        toast.fromError(e, "Couldn’t reset the wizard step.");
-      }
-    }
-    selectedIdeaIds.value = [];
-    liveEvents.value = [];
-    uiStep.value = step;
-    return;
-  }
-  try {
-    const rewound = await post<MealPlanWizardSession>(
-      `/meal-plan-wizard/sessions/${session.value.id}/rewind/`,
-      { to_step: step as MealPlanWizardStep }
-    );
-    session.value = rewound;
-    selectedIdeaIds.value = rewound.selected_idea_ids;
-    uiStep.value = step;
-  } catch (e) {
-    error.value = getErrorMessage(e, "Could not go back");
-    toast.fromError(e, "Could not go back");
-  }
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 async function openAssignStep() {
@@ -639,61 +909,45 @@ async function openAssignStep() {
         (key) => !titles[key]
       ) ?? null;
   } catch (e) {
-    console.error(e);
     toast.fromError(e, "Couldn’t load your meal plan.");
   } finally {
     loadingAssignDays.value = false;
   }
 }
 
-async function commitPlan(opts?: { assignDay?: string | null }) {
+async function commitStandaloneRecipe(opts?: { assignDay?: string | null }) {
   if (!session.value) return;
   error.value = "";
   busy.value = true;
   try {
-    // Zip order: day[i] ↔ built_recipes[i]. Recipe create skips PlannedRecipe here;
-    // optional day assign is a follow-up POST when the user picks a night.
-    await post(`/meal-plan-wizard/sessions/${session.value.id}/commit/`, {
-      plan: !recipeMode.value
-    });
-    if (recipeMode.value) {
-      await refreshSession();
-      const built = session.value?.built_recipes[0];
-      // New generates set created_recipe_id; library reuse sets existing_recipe_id.
-      const recipeId = built?.created_recipe_id ?? built?.existing_recipe_id ?? null;
-      const dayKey = opts?.assignDay ?? null;
-      if (dayKey && recipeId != null) {
-        const date = parseDateKey(dayKey);
-        if (date) {
-          await post("/planned-recipe/", {
-            recipe_id: recipeId,
-            planned_for: date.toISOString()
-          });
-          syncAfterPlanMutation({ recipesChanged: true });
-          toast.success("Recipe saved and added to your plan.");
-          router.push(paths.recipeDetail(recipeId));
-          return;
-        }
+    await post(`/meal-plan-wizard/sessions/${session.value.id}/commit/`, { plan: false });
+    await refreshSession();
+    const built = session.value?.built_recipes[0];
+    const recipeId = built?.created_recipe_id ?? built?.existing_recipe_id ?? null;
+    const dayKey = opts?.assignDay ?? null;
+    if (dayKey && recipeId != null) {
+      const date = parseDateKey(dayKey);
+      if (date) {
+        await post("/planned-recipe/", {
+          recipe_id: recipeId,
+          planned_for: date.toISOString()
+        });
+        syncAfterPlanMutation({ recipesChanged: true });
+        toast.success("Recipe saved and added to your plan.");
+        await router.push(paths.recipeDetail(recipeId));
+        return;
       }
-      syncAfterRecipeMutation();
-      toast.success("Recipe saved.");
-      if (recipeId != null) {
-        router.push(paths.recipeDetail(recipeId));
-      } else {
-        router.push(paths.recipes);
-      }
-      return;
     }
-    // Wizard creates recipes + planned meals; grocery derives from the plan.
-    syncAfterPlanMutation({ recipesChanged: true });
-    toast.success("Meal plan saved.");
-    router.push(paths.planner);
+    syncAfterRecipeMutation();
+    toast.success("Recipe saved.");
+    if (recipeId != null) {
+      await router.push(paths.recipeDetail(recipeId));
+    } else {
+      await router.push(paths.recipes);
+    }
   } catch (e) {
-    error.value = getErrorMessage(
-      e,
-      recipeMode.value ? "Could not save recipe" : "Could not save plan"
-    );
-    toast.fromError(e, recipeMode.value ? "Could not save recipe" : "Could not save plan");
+    error.value = getErrorMessage(e, "Could not save recipe");
+    toast.fromError(e, "Could not save recipe");
   } finally {
     busy.value = false;
   }
@@ -701,39 +955,59 @@ async function commitPlan(opts?: { assignDay?: string | null }) {
 
 onMounted(async () => {
   localPrefs.value = { ...savedPrefs.value };
+  singleNightPrefs.value = {
+    ...emptyWizardPrefs(),
+    dietary_restrictions: savedPrefs.value.dietary_restrictions,
+    servings: savedPrefs.value.servings
+  };
 
   if (recipeMode.value) {
-    // Placeholder day satisfies the session quota (select_count = 1); never planned.
-    weekDays.value = weekFromSeed(today);
-    selectedDays.value = [toDateKey(today)];
+    selectedDays.value = [todayKey.value];
     loadingDays.value = false;
     uiStep.value = "prefs";
     return;
   }
 
-  const fromQuery = parseDaysFromQuery();
-  // Scope the wizard to one week: prefer the week of the first queried day.
-  const seed = fromQuery.length ? parseDateKey(fromQuery[0]!) ?? today : today;
-  weekDays.value = weekFromSeed(seed);
-  const keys = weekDayKeys.value;
-
   loadingDays.value = true;
-  plannedTitles.value = await loadPlannedForWeek(weekDays.value);
+  await loadPlannedForLoadedWeeks();
   loadingDays.value = false;
 
-  // Auto-skip nights that already have a dinner or are in the past. Prefer the
-  // caller's day list (fill-gaps / plan-week / autofill), then drop planned/past.
-  const preferred = fromQuery.length ? clampDaysToWeek(fromQuery, keys) : [...keys];
-  selectedDays.value = preferred.filter((key) => !plannedTitles.value[key] && !isDayPast(key));
+  const fromQuery = parseDaysFromQuery();
+  if (fromQuery.length) {
+    const valid = [...new Set(fromQuery.filter((k) => !isDayPast(k)))].sort();
+    const openValid = valid.filter((k) => !plannedTitles.value[k]);
+    selectedDays.value = openValid.length ? openValid : valid;
+  } else {
+    const firstWeekKeys = weeks.value[0]?.dayKeys ?? [];
+    selectedDays.value = firstWeekKeys.filter((k) => !plannedTitles.value[k] && !isDayPast(k));
+  }
+
+  if (typeof IntersectionObserver !== "undefined") {
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && uiStep.value === "days") {
+          weekCount.value += 1;
+        }
+      },
+      { rootMargin: "120px" }
+    );
+    if (sentinelRef.value) observer.observe(sentinelRef.value);
+  }
+});
+
+watch(sentinelRef, (el) => {
+  if (observer && el) observer.observe(el);
 });
 
 onUnmounted(() => {
   abortController?.abort();
+  observer?.disconnect();
 });
 </script>
 
 <template>
-  <div class="px-4 pt-4 pb-6">
+  <div class="px-4 pt-4 pb-36">
+    <!-- Header -->
     <div class="flex items-center gap-2">
       <button
         type="button"
@@ -745,29 +1019,16 @@ onUnmounted(() => {
       </button>
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-bold uppercase tracking-[0.08em] text-success-soft">
-          {{ recipeMode ? "Create" : "Meal plan wizard" }}
+          {{ headerEyebrow }}
         </p>
         <h1 class="truncate text-lg font-bold">{{ headerTitle }}</h1>
       </div>
       <span
-        v-if="session?.stubbed === true"
+        v-if="session?.stubbed === true && uiStep !== 'days' && uiStep !== 'hub'"
         class="rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] font-semibold text-faint"
       >
         Stub LLM
       </span>
-    </div>
-
-    <!-- Step dots -->
-    <div class="mt-3 flex items-center gap-1.5">
-      <button
-        v-for="(s, i) in STEP_ORDER"
-        :key="s"
-        type="button"
-        class="h-1 flex-1 rounded-full transition-colors"
-        :class="i <= stepIndex ? 'bg-[#16a34a]' : 'bg-secondary'"
-        :disabled="i >= stepIndex || running || s === 'ideate' || s === 'build'"
-        @click="i < stepIndex && s !== 'ideate' && s !== 'build' && rewindTo(s)"
-      />
     </div>
 
     <p
@@ -777,146 +1038,283 @@ onUnmounted(() => {
       {{ error }}
     </p>
 
-    <!-- DAYS -->
-    <section v-if="uiStep === 'days'" class="mt-5">
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <p class="text-sm font-semibold text-foreground">{{ weekHeading }}</p>
-          <p class="mt-0.5 text-sm text-muted-foreground">
-            <template v-if="loadingDays">Checking what’s already planned…</template>
-            <template v-else-if="alreadyPlannedCount">
-              Nights with a dinner are skipped — tap one to replan it anyway.
-            </template>
-            <template v-else>
-              Tap nights to plan. Highlighted nights get a dinner; the rest are skipped.
-            </template>
-          </p>
-        </div>
-        <div class="flex shrink-0 gap-2">
-          <button
-            type="button"
-            class="text-[12px] font-semibold text-[#22c55e] transition-opacity active:opacity-70"
-            @click="selectAllOpenNights"
-          >
-            Open
-          </button>
-          <button
-            type="button"
-            class="text-[12px] font-semibold text-faint transition-opacity active:opacity-70"
-            @click="clearWeekDays"
-          >
-            None
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-3 overflow-hidden rounded-xl border border-border bg-card">
-        <button
-          v-for="(day, i) in weekDays"
-          :key="toDateKey(day)"
-          type="button"
-          class="flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left transition-colors last:border-b-0"
-          :class="
-            isDayPast(day)
-              ? 'cursor-not-allowed bg-transparent opacity-40'
-              : isDaySelected(toDateKey(day))
-                ? 'bg-[rgba(34,197,94,0.14)]'
-                : 'bg-transparent opacity-70'
-          "
-          :disabled="isDayPast(day)"
-          :aria-disabled="isDayPast(day) || undefined"
-          :aria-pressed="isDaySelected(toDateKey(day))"
-          @click="toggleDay(toDateKey(day))"
-        >
-          <span
-            class="flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors"
-            :class="
-              isDaySelected(toDateKey(day))
-                ? 'border-[#16a34a] bg-[#16a34a] text-primary-foreground'
-                : 'border-border bg-secondary/40'
-            "
-          >
-            <Check v-if="isDaySelected(toDateKey(day))" class="size-3.5" />
-          </span>
-          <div class="min-w-0 flex-1">
-            <p
-              class="text-sm font-semibold"
-              :class="isDaySelected(toDateKey(day)) ? 'text-foreground' : 'text-muted-foreground'"
-            >
-              {{ DAY_LABELS[i] }} · {{ day.getDate() }}
-              <span
-                v-if="toDateKey(day) === todayKey"
-                class="ml-1 text-[11px] font-bold uppercase tracking-wide text-[#22c55e]"
-              >
-                Today
-              </span>
-            </p>
-            <p v-if="isDayPast(day)" class="mt-0.5 truncate text-[12px] text-faint">Past</p>
-            <p
-              v-else-if="plannedTitleFor(toDateKey(day))"
-              class="mt-0.5 truncate text-[12px]"
-              :class="isDaySelected(toDateKey(day)) ? 'text-muted-foreground' : 'text-[#86efac]/80'"
-            >
-              {{
-                isDaySelected(toDateKey(day))
-                  ? `Replace · ${plannedTitleFor(toDateKey(day))}`
-                  : plannedTitleFor(toDateKey(day))
-              }}
-            </p>
-            <p v-else class="mt-0.5 text-[11px] text-muted-foreground">
-              {{ isDaySelected(toDateKey(day)) ? "Open night" : "Skipping" }}
-            </p>
-          </div>
-          <span
-            class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-            :class="
-              isDayPast(day)
-                ? 'bg-secondary text-faint'
-                : isDaySelected(toDateKey(day))
-                  ? 'bg-[rgba(34,197,94,0.18)] text-[#86efac]'
-                  : plannedTitleFor(toDateKey(day))
-                    ? 'bg-secondary text-muted-foreground'
-                    : 'bg-secondary text-faint'
-            "
-          >
-            {{
-              isDayPast(day)
-                ? "Past"
-                : isDaySelected(toDateKey(day))
-                  ? plannedTitleFor(toDateKey(day))
-                    ? "Replan"
-                    : "Plan"
-                  : plannedTitleFor(toDateKey(day))
-                    ? "Kept"
-                    : "Skip"
-            }}
-          </span>
-        </button>
-      </div>
-
-      <p class="mt-2 text-xs text-faint">
-        <template v-if="loadingDays">Loading plans…</template>
+    <!-- STEP 1: SCROLLABLE MULTI-WEEK NIGHT SELECTION -->
+    <section v-if="uiStep === 'days'" class="mt-4 space-y-5">
+      <p class="text-sm text-muted-foreground">
+        <template v-if="loadingDays">Checking what’s already planned…</template>
         <template v-else>
-          Planning {{ selectedDays.length }} of {{ weekDayKeys.length }}
-          <span v-if="alreadyPlannedCount"> · {{ alreadyPlannedCount }} already planned </span>
-          <span v-else-if="skippedCount"> · skipping {{ skippedCount }}</span>
+          Tap nights to include in your meal plan. Scroll down to add more weeks.
         </template>
       </p>
-      <Button
-        type="button"
-        class="mt-4 w-full"
-        data-testid="wizard-continue-days"
-        :disabled="!canContinueDays || busy || loadingDays"
-        @click="goForwardFromDays"
+
+      <div v-for="week in weeks" :key="week.weekIndex" class="space-y-2">
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm font-semibold text-foreground">{{ week.label }}</p>
+          <div class="flex shrink-0 gap-3">
+            <button
+              type="button"
+              class="text-[12px] font-semibold text-[#22c55e] transition-opacity active:opacity-70"
+              @click="selectWeekOpen(week.dayKeys)"
+            >
+              Open
+            </button>
+            <button
+              type="button"
+              class="text-[12px] font-semibold text-faint transition-opacity active:opacity-70"
+              @click="clearWeekDays(week.dayKeys)"
+            >
+              None
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-hidden rounded-xl border border-border bg-card">
+          <button
+            v-for="(day, i) in week.days"
+            :key="week.dayKeys[i]"
+            type="button"
+            class="flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left transition-colors last:border-b-0"
+            :class="
+              isDayPast(day)
+                ? 'cursor-not-allowed bg-transparent opacity-40'
+                : isDaySelected(week.dayKeys[i]!)
+                  ? 'bg-[rgba(34,197,94,0.14)]'
+                  : 'bg-transparent opacity-70'
+            "
+            :disabled="isDayPast(day)"
+            :aria-disabled="isDayPast(day) || undefined"
+            :aria-pressed="isDaySelected(week.dayKeys[i]!)"
+            @click="toggleDay(week.dayKeys[i]!)"
+          >
+            <span
+              class="flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors"
+              :class="
+                isDaySelected(week.dayKeys[i]!)
+                  ? 'border-[#16a34a] bg-[#16a34a] text-primary-foreground'
+                  : 'border-border bg-secondary/40'
+              "
+            >
+              <Check v-if="isDaySelected(week.dayKeys[i]!)" class="size-3.5" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <p
+                class="text-sm font-semibold"
+                :class="
+                  isDaySelected(week.dayKeys[i]!) ? 'text-foreground' : 'text-muted-foreground'
+                "
+              >
+                {{ DAY_LABELS[i] }} · {{ day.getDate() }}
+                <span
+                  v-if="week.dayKeys[i] === todayKey"
+                  class="ml-1 text-[11px] font-bold uppercase tracking-wide text-[#22c55e]"
+                >
+                  Today
+                </span>
+              </p>
+              <p v-if="isDayPast(day)" class="mt-0.5 truncate text-[12px] text-faint">Past</p>
+              <p
+                v-else-if="draftByDay[week.dayKeys[i]!]"
+                class="mt-0.5 truncate text-[12px] font-medium text-[#86efac]"
+              >
+                {{ draftByDay[week.dayKeys[i]!]!.title }}
+              </p>
+              <p
+                v-else-if="plannedTitles[week.dayKeys[i]!]"
+                class="mt-0.5 truncate text-[12px]"
+                :class="
+                  isDaySelected(week.dayKeys[i]!) ? 'text-muted-foreground' : 'text-[#86efac]/80'
+                "
+              >
+                {{
+                  isDaySelected(week.dayKeys[i]!)
+                    ? `Replace · ${plannedTitles[week.dayKeys[i]!]}`
+                    : plannedTitles[week.dayKeys[i]!]
+                }}
+              </p>
+              <p v-else class="mt-0.5 text-[11px] text-muted-foreground">
+                {{ isDaySelected(week.dayKeys[i]!) ? "Open night" : "Skipping" }}
+              </p>
+            </div>
+            <span
+              class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+              :class="
+                isDayPast(day)
+                  ? 'bg-secondary text-faint'
+                  : draftByDay[week.dayKeys[i]!]
+                    ? 'border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.18)] text-[#86efac]'
+                    : isDaySelected(week.dayKeys[i]!)
+                      ? 'bg-[rgba(34,197,94,0.18)] text-[#86efac]'
+                      : plannedTitles[week.dayKeys[i]!]
+                        ? 'bg-secondary text-muted-foreground'
+                        : 'bg-secondary text-faint'
+              "
+            >
+              {{
+                isDayPast(day)
+                  ? "Past"
+                  : draftByDay[week.dayKeys[i]!]
+                    ? "Planned"
+                    : isDaySelected(week.dayKeys[i]!)
+                      ? plannedTitles[week.dayKeys[i]!]
+                        ? "Replan"
+                        : "Plan"
+                      : plannedTitles[week.dayKeys[i]!]
+                        ? "Kept"
+                        : "Skip"
+              }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div ref="sentinelRef" class="pt-1">
+        <button
+          type="button"
+          class="w-full rounded-xl border border-dashed border-border py-3 text-center text-xs font-semibold text-muted-foreground transition-opacity active:opacity-70"
+          @click="loadAnotherWeek"
+        >
+          + Show next week ({{ weeks.length }} weeks loaded)
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 2: NIGHT-BY-NIGHT PLANNING HUB -->
+    <section v-else-if="uiStep === 'hub'" class="mt-4 space-y-4">
+      <div
+        class="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3.5"
       >
-        Continue with {{ selectedDays.length }} night{{ selectedDays.length === 1 ? "" : "s" }}
-      </Button>
-      <p
-        v-if="!loadingDays && !selectedDays.length && alreadyPlannedCount"
-        class="mt-2 text-center text-xs text-muted-foreground"
-      >
-        Every night already has a dinner. Tap one to replan it, or head back.
-      </p>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">
+            {{ plannedSelectedCount }} of {{ selectedDays.length }} night{{
+              selectedDays.length === 1 ? "" : "s"
+            }}
+            planned
+          </p>
+          <p class="mt-0.5 text-xs text-muted-foreground">
+            Plan each night below, or auto-fill the rest at once.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          class="shrink-0 gap-1.5"
+          :disabled="busy"
+          @click="startFillWeekFlow"
+        >
+          <Sparkles class="size-3.5" />
+          Fill plan
+        </Button>
+      </div>
+
+      <div class="space-y-2.5">
+        <div
+          v-for="dayKey in selectedDays"
+          :key="dayKey"
+          class="overflow-hidden rounded-xl border bg-card"
+          :class="draftByDay[dayKey] ? 'border-[rgba(34,197,94,0.35)]' : 'border-border'"
+        >
+          <div class="flex items-center gap-3 px-3.5 py-3">
+            <button
+              type="button"
+              class="min-w-0 flex-1 text-left"
+              @click="draftByDay[dayKey] ? toggleHubExpand(dayKey) : openNightMenu(dayKey)"
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-bold uppercase tracking-wide text-faint">
+                  {{ dayLabel(dayKey) }}
+                </span>
+                <span
+                  v-if="dayKey === todayKey"
+                  class="text-[10px] font-bold uppercase text-[#22c55e]"
+                >
+                  Today
+                </span>
+                <span
+                  v-if="draftByDay[dayKey]"
+                  class="rounded-full bg-[rgba(34,197,94,0.15)] px-2 py-0.5 text-[10px] font-semibold text-[#86efac]"
+                >
+                  {{
+                    draftByDay[dayKey]!.kind === "generated"
+                      ? "Generated"
+                      : draftByDay[dayKey]!.kind === "imported"
+                        ? "Imported"
+                        : "Saved"
+                  }}
+                </span>
+              </div>
+
+              <div v-if="draftByDay[dayKey]" class="mt-1 flex items-center gap-2.5">
+                <img
+                  v-if="draftByDay[dayKey]!.cover_url"
+                  :src="mediaUrl(draftByDay[dayKey]!.cover_url!)"
+                  :alt="draftByDay[dayKey]!.title"
+                  class="size-9 shrink-0 rounded-lg object-cover"
+                />
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold">
+                    {{ draftByDay[dayKey]!.title }}
+                  </p>
+                  <p
+                    v-if="draftByDay[dayKey]!.prep_time"
+                    class="mt-0.5 text-[11px] text-muted-foreground"
+                  >
+                    {{ formatPrepTime(draftByDay[dayKey]!.prep_time!) }}
+                  </p>
+                </div>
+              </div>
+              <p v-else class="mt-1 text-sm text-muted-foreground">
+                {{
+                  plannedTitles[dayKey] ? `Replacing: ${plannedTitles[dayKey]}` : "Not planned yet"
+                }}
+              </p>
+            </button>
+
+            <Button
+              size="sm"
+              :variant="draftByDay[dayKey] ? 'outline' : 'default'"
+              @click="openNightMenu(dayKey)"
+            >
+              {{ draftByDay[dayKey] ? "Change" : "Plan" }}
+            </Button>
+          </div>
+
+          <div
+            v-if="draftByDay[dayKey] && expandedHubDays.includes(dayKey)"
+            class="space-y-3 border-t border-border px-3.5 pb-3.5 pt-2.5"
+          >
+            <p v-if="draftByDay[dayKey]!.description" class="text-sm text-muted-foreground">
+              {{ draftByDay[dayKey]!.description }}
+            </p>
+
+            <div v-if="draftByDay[dayKey]!.builtRecipe?.ingredients?.length">
+              <p class="text-xs font-semibold uppercase tracking-wide text-faint">Ingredients</p>
+              <ul class="mt-1.5 space-y-1">
+                <li
+                  v-for="(ing, idx) in draftByDay[dayKey]!.builtRecipe!.ingredients"
+                  :key="`${dayKey}-ing-${idx}`"
+                  class="text-sm text-foreground/90"
+                >
+                  {{ formatIngredient(ing) }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="draftByDay[dayKey]!.builtRecipe?.instructions">
+              <p class="text-xs font-semibold uppercase tracking-wide text-faint">Instructions</p>
+              <div class="mt-1.5 space-y-2 text-sm leading-relaxed text-foreground/90">
+                <p
+                  v-for="(step, idx) in splitInstructionSteps(
+                    draftByDay[dayKey]!.builtRecipe!.instructions
+                  )"
+                  :key="idx"
+                >
+                  {{ step }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- PREFS -->
@@ -926,9 +1324,7 @@ onUnmounted(() => {
           type="button"
           class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors"
           :class="
-            inputMode === 'simple'
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground'
+            inputMode === 'simple' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
           "
           @click="inputMode = 'simple'"
         >
@@ -944,16 +1340,16 @@ onUnmounted(() => {
           "
           @click="inputMode = 'structured'"
         >
-          Week form
+          {{ isSingleNightFlow ? "Dinner form" : "Week form" }}
         </button>
       </div>
 
       <template v-if="inputMode === 'simple'">
         <p class="mb-3 text-sm text-muted-foreground">
           {{
-            recipeMode
-              ? "Describe the recipe you want — ingredients, style, dietary needs, etc."
-              : `Describe dinners for your ${selectedDays.length} selected night${selectedDays.length === 1 ? "" : "s"}.`
+            isSingleNightFlow
+              ? "Describe what you want to cook — ingredients on hand, style, dietary needs, etc. We’ll generate 3 options."
+              : `Describe dinners for your ${activeGenerationDays.length} night${activeGenerationDays.length === 1 ? "" : "s"}.`
           }}
         </p>
         <Textarea
@@ -963,6 +1359,12 @@ onUnmounted(() => {
           class="min-h-32 rounded-xl bg-card"
         />
       </template>
+      <template v-else-if="isSingleNightFlow">
+        <p class="mb-4 text-sm text-muted-foreground">
+          Tell us what sounds good for this dinner and we’ll propose 3 options.
+        </p>
+        <SingleNightPrefsFields v-model="singleNightPrefs" />
+      </template>
       <template v-else>
         <p class="mb-4 text-sm text-muted-foreground">
           Everything here is optional. We’ll remember goals and diet for next time.
@@ -971,25 +1373,10 @@ onUnmounted(() => {
       </template>
 
       <div class="mt-5 grid grid-cols-2 gap-2">
-        <Button
-          variant="outline"
-          :disabled="busy"
-          @click="recipeMode ? leaveWizard() : rewindTo('days')"
-        >
-          Back
-        </Button>
-        <Button
-          v-if="inputMode === 'simple'"
-          class="gap-1.5"
-          :disabled="!canContinueSimple"
-          @click="runFreeformBuild()"
-        >
+        <Button variant="outline" :disabled="busy" @click="goBack">Back</Button>
+        <Button class="gap-1.5" :disabled="!canStartIdeate" @click="runIdeate()">
           <Sparkles class="size-3.5" />
-          {{ recipeMode ? "Generate recipe" : `Build ${selectedDays.length} dinner${selectedDays.length === 1 ? "" : "s"}` }}
-        </Button>
-        <Button v-else class="gap-1.5" :disabled="busy" @click="runIdeate()">
-          <Sparkles class="size-3.5" />
-          Generate ideas
+          {{ isSingleNightFlow ? "Get 3 options" : "Generate ideas" }}
         </Button>
       </div>
     </section>
@@ -1002,19 +1389,17 @@ onUnmounted(() => {
         :title="uiStep === 'ideate' ? 'Ideating dinners' : 'Writing full recipes'"
         :subtitle="
           uiStep === 'ideate'
-            ? `Aiming for ${session?.idea_target_count ?? selectedDays.length + 5} options`
-            : inputMode === 'simple'
-              ? recipeMode
-                ? 'Writing your recipe from your description'
-                : `Writing ${selectCount} recipes from your description`
+            ? isSingleNightFlow
+              ? 'Generating 3 dinner options'
+              : `Aiming for ${session?.idea_target_count ?? activeGenerationDays.length + 5} options`
+            : isSingleNightFlow
+              ? 'Writing your chosen recipe'
               : `Building ${selectCount} recipes from your picks`
         "
       />
       <div v-if="!running && error" class="grid grid-cols-2 gap-2">
         <Button variant="outline" @click="rewindTo('prefs')">Edit input</Button>
-        <Button @click="uiStep === 'ideate' ? runIdeate() : inputMode === 'simple' ? runFreeformBuild() : runBuild()">
-          Retry
-        </Button>
+        <Button @click="uiStep === 'ideate' ? runIdeate() : runBuild()">Retry</Button>
       </div>
       <div v-else class="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
@@ -1026,7 +1411,12 @@ onUnmounted(() => {
     <section v-else-if="uiStep === 'select'" class="mt-5 space-y-4">
       <div class="flex items-end justify-between gap-2">
         <p class="text-sm text-muted-foreground">
-          <template v-if="selectionFull"> All set — deselect one if you want to swap. </template>
+          <template v-if="selectCount === 1">
+            Pick 1 of the 3 options below to generate the full recipe.
+          </template>
+          <template v-else-if="selectionFull">
+            All set — deselect one if you want to swap.
+          </template>
           <template v-else>
             Choose <span class="font-semibold text-foreground">{{ selectCount }}</span> of
             {{ session?.ideas.length ?? 0 }} ideas
@@ -1073,7 +1463,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <details class="rounded-xl border border-border bg-card px-3 py-2">
+      <details v-if="!isSingleNightFlow" class="rounded-xl border border-border bg-card px-3 py-2">
         <summary class="cursor-pointer text-sm font-semibold">Adjust goals / diet</summary>
         <div class="mt-3 pb-2">
           <WizardPrefsFields v-model="localPrefs" />
@@ -1081,14 +1471,14 @@ onUnmounted(() => {
       </details>
 
       <div class="rounded-xl border border-border bg-card p-3">
-        <p class="text-sm font-semibold">Refine ideas</p>
+        <p class="text-sm font-semibold">Refine options</p>
         <p class="mt-0.5 text-xs text-muted-foreground">
           Tweaks re-run ideation with prior context — not from scratch.
         </p>
         <Textarea
           v-model="refineText"
           class="mt-2 min-h-16"
-          placeholder="More vegetarian options, less pasta, add a spicy night…"
+          placeholder="More vegetarian options, less pasta, something spicier…"
         />
         <Button
           variant="secondary"
@@ -1105,19 +1495,15 @@ onUnmounted(() => {
       <div class="grid grid-cols-2 gap-2">
         <Button variant="outline" :disabled="busy" @click="rewindTo('prefs')">Back</Button>
         <Button :disabled="!canContinueSelect || busy" @click="confirmSelectionAndBuild()">
-          Build recipes
+          {{ isSingleNightFlow ? "Generate recipe" : "Build recipes" }}
         </Button>
       </div>
     </section>
 
-    <!-- REVIEW -->
+    <!-- REVIEW (standalone recipeMode only) -->
     <section v-else-if="uiStep === 'review'" class="mt-5 space-y-4">
       <p class="text-sm text-muted-foreground">
-        {{
-          recipeMode
-            ? "Here’s your recipe. Expand for the full write-up, or mark it to regenerate."
-            : "Here’s your week. Expand a night for the full recipe, or mark dinners to regenerate."
-        }}
+        Here’s your recipe. Expand for the full write-up, or mark it to regenerate.
       </p>
 
       <div class="space-y-2">
@@ -1139,9 +1525,7 @@ onUnmounted(() => {
               :class="isExpanded(row.day) ? 'rotate-0' : '-rotate-90'"
             />
             <div class="min-w-0 flex-1">
-              <p class="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                {{ recipeMode ? "New recipe" : dayLabel(row.day) }}
-              </p>
+              <p class="text-[11px] font-semibold uppercase tracking-wide text-faint">New recipe</p>
               <p class="mt-0.5 text-sm font-semibold leading-snug">
                 {{ row.recipe?.title || "Untitled dinner" }}
               </p>
@@ -1207,36 +1591,14 @@ onUnmounted(() => {
       </div>
 
       <div class="rounded-xl border border-border bg-card p-3">
-        <div class="flex items-center justify-between gap-2">
-          <p class="text-sm font-semibold">Refine recipes</p>
-          <div class="flex gap-2">
-            <button
-              type="button"
-              class="text-[11.5px] font-semibold text-[#22c55e] transition-opacity active:opacity-70"
-              @click="markAllForRegen"
-            >
-              Mark all
-            </button>
-            <button
-              type="button"
-              class="text-[11.5px] font-semibold text-faint transition-opacity active:opacity-70"
-              @click="clearRegenMarks"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
+        <p class="text-sm font-semibold">Refine recipe</p>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          Mark dinners above, then describe changes. Prior turns stay in context so the week stays
-          coherent.
-        </p>
-        <p class="mt-1.5 text-xs tabular-nums text-faint">
-          {{ regenIdeaIds.length }} marked for regeneration
+          Mark the recipe above, then describe any tweaks.
         </p>
         <Textarea
           v-model="refineText"
           class="mt-2 min-h-16"
-          placeholder="Make the pasta spicier, cut cook time on Tuesday, swap tofu for chicken…"
+          placeholder="Make it spicier, cut cook time, swap tofu for chicken…"
         />
         <Button
           variant="secondary"
@@ -1246,20 +1608,19 @@ onUnmounted(() => {
           @click="applyRefinement"
         >
           <RefreshCw class="size-3.5" />
-          Regenerate marked
-          <span v-if="regenIdeaIds.length">({{ regenIdeaIds.length }})</span>
+          Regenerate
         </Button>
       </div>
 
       <div class="grid grid-cols-2 gap-2">
         <Button variant="outline" :disabled="busy" @click="rewindTo('select')">Back</Button>
-        <Button :disabled="busy" @click="recipeMode ? openAssignStep() : commitPlan()">
-          {{ busy ? "Saving…" : recipeMode ? "Continue" : "Save to planner" }}
+        <Button :disabled="busy" @click="openAssignStep()">
+          {{ busy ? "Saving…" : "Continue" }}
         </Button>
       </div>
     </section>
 
-    <!-- ASSIGN (recipeMode only) — optional night after create -->
+    <!-- ASSIGN (standalone recipeMode only) -->
     <section v-else-if="uiStep === 'assign'" class="mt-5 space-y-4">
       <p class="text-sm text-muted-foreground">
         “{{ recipeTitle }}” is ready. Put it on a night if you want — or skip and keep it in your
@@ -1311,16 +1672,265 @@ onUnmounted(() => {
       </div>
 
       <div class="grid grid-cols-2 gap-2">
-        <Button variant="outline" :disabled="busy" @click="commitPlan({ assignDay: null })">
+        <Button
+          variant="outline"
+          :disabled="busy"
+          @click="commitStandaloneRecipe({ assignDay: null })"
+        >
           {{ busy ? "Saving…" : "Skip" }}
         </Button>
         <Button
           :disabled="busy || loadingAssignDays || !assignDayKey"
-          @click="commitPlan({ assignDay: assignDayKey })"
+          @click="commitStandaloneRecipe({ assignDay: assignDayKey })"
         >
           {{ busy ? "Saving…" : "Save & plan" }}
         </Button>
       </div>
     </section>
+
+    <!-- FLOATING FOOTER FOR STEP 1 (DAYS) & STEP 2 (HUB) -->
+    <div
+      v-if="uiStep === 'days'"
+      class="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 w-full max-w-md -translate-x-1/2 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur-sm"
+    >
+      <Button
+        type="button"
+        class="w-full"
+        data-testid="wizard-continue-days"
+        :disabled="!canContinueDays || busy || loadingDays"
+        @click="uiStep = 'hub'"
+      >
+        Continue with {{ selectedDays.length }} night{{ selectedDays.length === 1 ? "" : "s" }}
+      </Button>
+    </div>
+
+    <div
+      v-else-if="uiStep === 'hub'"
+      class="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 grid w-full max-w-md -translate-x-1/2 grid-cols-2 gap-2 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur-sm"
+    >
+      <Button variant="outline" :disabled="busy" @click="uiStep = 'days'">Back</Button>
+      <Button :disabled="busy" @click="saveHubPlan">
+        {{ busy ? "Saving…" : "Save" }}
+      </Button>
+    </div>
+
+    <!-- NIGHT ACTION MENU DIALOG -->
+    <Dialog v-model:open="menuDialogOpen">
+      <DialogContent class="max-w-sm border-border bg-card">
+        <DialogHeader>
+          <DialogTitle>{{ dayFullLabel(menuNightKey) }}</DialogTitle>
+          <DialogDescription>Choose how you’d like to plan this night.</DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-1.5">
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.1)] px-3 py-3 text-left transition-opacity active:opacity-80"
+            @click="menuNightKey && startSingleNightGenerate(menuNightKey)"
+          >
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#16a34a]">
+              <Sparkles class="size-4 text-primary-foreground" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold">Generate a recipe</span>
+              <span class="block text-xs text-muted-foreground">
+                Describe a craving or use the dinner form
+              </span>
+            </span>
+            <ChevronRight class="size-4 text-faint" />
+          </button>
+
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl border border-border bg-secondary/40 px-3 py-3 text-left transition-opacity active:opacity-80"
+            @click="menuNightKey && startFindForNight(menuNightKey)"
+          >
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary">
+              <Search class="size-4 text-foreground" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold">Choose from existing</span>
+              <span class="block text-xs text-muted-foreground">
+                Search and pick from your saved recipe book
+              </span>
+            </span>
+            <ChevronRight class="size-4 text-faint" />
+          </button>
+
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl border border-border bg-secondary/40 px-3 py-3 text-left transition-opacity active:opacity-80"
+            @click="menuNightKey && startImportForNight(menuNightKey)"
+          >
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary">
+              <Plus class="size-4 text-foreground" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold">Import new</span>
+              <span class="block text-xs text-muted-foreground">
+                Paste a recipe link to save and attach
+              </span>
+            </span>
+            <ChevronRight class="size-4 text-faint" />
+          </button>
+
+          <button
+            v-if="menuNightKey && draftByDay[menuNightKey]"
+            type="button"
+            class="mt-1 flex w-full items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-left text-destructive transition-opacity active:opacity-80"
+            @click="removeNightDraft(menuNightKey)"
+          >
+            <Trash2 class="size-4" />
+            <span class="text-sm font-semibold">Remove from this night</span>
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- CHOOSE FROM EXISTING DIALOG -->
+    <Dialog v-model:open="findDialogOpen">
+      <DialogContent class="max-h-[80dvh] max-w-sm overflow-hidden border-border bg-card">
+        <DialogHeader>
+          <DialogTitle>Choose recipe for {{ dayLabel(activeNightKey ?? "") }}</DialogTitle>
+          <DialogDescription>Tap any saved recipe to attach it to this night.</DialogDescription>
+        </DialogHeader>
+
+        <div class="relative">
+          <Search
+            class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint"
+          />
+          <Input
+            v-model="findSearchText"
+            type="search"
+            placeholder="Search recipes…"
+            class="h-11 rounded-xl border-border bg-secondary/40 pl-10"
+          />
+        </div>
+
+        <div class="max-h-[42dvh] space-y-2 overflow-y-auto pr-1">
+          <template v-if="findLoadingList || (findSearching && !findDisplayList.length)">
+            <div
+              v-for="n in 4"
+              :key="n"
+              class="flex items-center gap-3 rounded-xl border border-border px-2 py-2"
+            >
+              <Skeleton class="size-12 rounded-lg" />
+              <div class="min-w-0 flex-1 space-y-1.5">
+                <Skeleton class="h-3.5 w-2/3" />
+                <Skeleton class="h-2.5 w-full" />
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <button
+              v-for="recipe in findDisplayList"
+              :key="recipe.id"
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl border border-border bg-secondary/40 px-2 py-2 text-left transition-opacity active:opacity-80"
+              @click="pickExistingRecipeForNight(recipe)"
+            >
+              <img
+                :src="mediaUrl(recipe.cover_image?.url)"
+                :alt="recipe.name"
+                class="size-12 shrink-0 rounded-lg object-cover"
+              />
+              <span class="min-w-0">
+                <span class="block truncate text-sm font-semibold">{{ recipe.name }}</span>
+                <span class="block truncate text-xs text-muted-foreground">{{
+                  recipe.description
+                }}</span>
+              </span>
+            </button>
+            <p
+              v-if="!findDisplayList.length"
+              class="py-6 text-center text-sm text-muted-foreground"
+            >
+              {{
+                findSearchText.trim() ? "No recipes matched that search." : "No saved recipes yet."
+              }}
+            </p>
+          </template>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" class="w-full" @click="findDialogOpen = false">Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- IMPORT RECIPE DIALOG -->
+    <Dialog v-model:open="importDialogOpen">
+      <DialogContent class="max-w-sm border-border bg-card">
+        <DialogHeader>
+          <DialogTitle>Import for {{ dayLabel(activeNightKey ?? "") }}</DialogTitle>
+          <DialogDescription>
+            Paste a recipe link to save it to your book and attach it to this night.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            :variant="importMethod === 'link' ? 'default' : 'outline'"
+            @click="importMethod = 'link'"
+          >
+            <Link2 class="size-4" />
+            Link
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            :variant="importMethod === 'photo' ? 'default' : 'outline'"
+            @click="importMethod = 'photo'"
+          >
+            <Camera class="size-4" />
+            Photo
+          </Button>
+        </div>
+
+        <template v-if="importMethod === 'link'">
+          <div>
+            <Label for="wizard-import-url" class="text-muted-foreground">Recipe URL</Label>
+            <Input
+              id="wizard-import-url"
+              v-model="importUrl"
+              type="url"
+              inputmode="url"
+              placeholder="https://…"
+              class="mt-2 h-11 rounded-xl border-border bg-secondary"
+              :disabled="importing"
+              @keydown.enter.prevent="handleImportForNight"
+            />
+            <p v-if="importError" class="mt-2 text-xs text-destructive">{{ importError }}</p>
+          </div>
+          <DialogFooter class="gap-2">
+            <Button variant="outline" :disabled="importing" @click="importDialogOpen = false">
+              Cancel
+            </Button>
+            <Button :disabled="!importUrl.trim() || importing" @click="handleImportForNight">
+              <LoaderCircle v-if="importing" class="size-4 animate-spin" />
+              {{ importing ? "Importing…" : "Import & attach" }}
+            </Button>
+          </DialogFooter>
+        </template>
+        <template v-else>
+          <div
+            class="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/50 px-4 text-center"
+          >
+            <Camera class="mb-2 size-7 text-[#22c55e]" />
+            <p class="text-sm font-semibold">Scan a photo</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Cookbook pages and handwritten cards — not available yet.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" class="w-full" @click="importDialogOpen = false">
+              Close
+            </Button>
+          </DialogFooter>
+        </template>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

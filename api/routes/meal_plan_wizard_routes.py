@@ -24,6 +24,7 @@ from api.schemas import (
     MealPlanWizardCreate,
     MealPlanWizardDaysUpdate,
     MealPlanWizardFreeformBuildRequest,
+    MealPlanWizardPlanCommitRequest,
     MealPlanWizardPrefs,
     MealPlanWizardRefineRequest,
     MealPlanWizardRewindRequest,
@@ -324,3 +325,19 @@ def commit_session(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     wizard_sessions.touch(session)
     return planned
+
+
+@router.post(
+    "/commit-plan/",
+    response_model=list[PlannedRecipeDetail],
+)
+def commit_plan_nights(
+    body: MealPlanWizardPlanCommitRequest,
+    current_user: CurrentUserDep,
+    db: SessionDep,
+):
+    nights = [n.model_dump() for n in body.nights]
+    try:
+        return pipeline.commit_nights(db, current_user, nights)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
