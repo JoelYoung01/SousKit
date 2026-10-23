@@ -7,7 +7,7 @@ import {
   updateIngredient,
   updateRecipe
 } from "@/api/recipes";
-import { uploadImage } from "@/api/uploads";
+import { uploadImage, type PickedImage } from "@/api/uploads";
 import { getErrorMessage } from "@/api/errors";
 import { del } from "@/api/client";
 import { CoverImagePickerSheet } from "@/components/CoverImagePickerSheet";
@@ -15,12 +15,20 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Sheet } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
 import { Textarea } from "@/components/ui/textarea";
 import { colors } from "@/lib/colors";
+import {
+  COVER_IMAGE_SOURCE_ITEMS,
+  readClipboardImage,
+  showCoverImageContextMenu,
+  type CoverImageSourceAction
+} from "@/lib/cover-image-menu";
 import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
 import { normalizeCoverOption, normalizeUpload } from "@/lib/coverMedia";
+import { tapHaptic } from "@/lib/haptics";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
 import type { RecipeCoverOption, RecipeDetail, UploadSlim } from "@/types";
@@ -28,7 +36,15 @@ import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { ImagePlus, Plus, Sparkles, Trash2 } from "lucide-react-native";
+import {
+  Camera,
+  ChevronRight,
+  ClipboardPaste,
+  ImagePlus,
+  Plus,
+  Sparkles,
+  Trash2
+} from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "@/components/ui/keyboard";
 import { Pressable, View } from "react-native";
@@ -74,6 +90,7 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   );
 
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [generatingCover, setGeneratingCover] = useState(false);
   const [coverError, setCoverError] = useState("");
   const [coverOptions, setCoverOptions] = useState<RecipeCoverOption[]>([]);
@@ -138,32 +155,111 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   const canSave = Boolean(validForm) && !saving && !loading;
   const canGenerateCover = Boolean(name.trim()) && !generatingCover && !saving && !loading;
 
-  const pickCoverImage = async () => {
-    if (uploadingCover) return;
-    setCoverError("");
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.85
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0]!;
+  const uploadCoverAsset = async (asset: PickedImage, successMessage?: string) => {
     setUploadingCover(true);
     try {
-      const upload = await uploadImage({
-        uri: asset.uri,
-        fileName: asset.fileName,
-        mimeType: asset.mimeType
-      });
+      const upload = await uploadImage(asset);
       const normalized = normalizeUpload(upload);
       setCoverImageId(normalized.id);
       setCoverPreviewUrl(normalized.url);
+      if (successMessage) {
+        toast.success(successMessage);
+      }
     } catch (er) {
       setCoverError(getErrorMessage(er, "Could not upload the image."));
       toast.fromError(er, "Could not upload the image.");
     } finally {
       setUploadingCover(false);
+    }
+  };
+
+  const takeCoverPhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        const msg = "Camera access is required to take a recipe photo.";
+        setCoverError(msg);
+        toast.error(msg);
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.85
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0]!;
+      await uploadCoverAsset({
+        uri: asset.uri,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType
+      });
+    } catch (er) {
+      setCoverError(getErrorMessage(er, "Could not open the camera."));
+      toast.fromError(er, "Could not open the camera.");
+    }
+  };
+
+  const pickCoverFromLibrary = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.85
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0]!;
+      await uploadCoverAsset({
+        uri: asset.uri,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType
+      });
+    } catch (er) {
+      setCoverError(getErrorMessage(er, "Could not open your photo library."));
+      toast.fromError(er, "Could not open your photo library.");
+    }
+  };
+
+  const pasteCoverFromClipboard = async () => {
+    const picked = await readClipboardImage();
+    if (!picked) {
+      const msg = "No image found on your clipboard. Copy an image first and try again.";
+      setCoverError(msg);
+      toast.error(msg);
+      return;
+    }
+    await uploadCoverAsset(picked, "Cover photo pasted from clipboard.");
+  };
+
+  const handleCoverSourceAction = async (action: CoverImageSourceAction) => {
+    setUploadMenuOpen(false);
+    if (uploadingCover) return;
+    setCoverError("");
+
+    if (action === "take-photo") {
+      await takeCoverPhoto();
+      return;
+    }
+    if (action === "camera-roll") {
+      await pickCoverFromLibrary();
+      return;
+    }
+    if (action === "clipboard") {
+      await pasteCoverFromClipboard();
+    }
+  };
+
+  const openCoverSourceMenu = () => {
+    if (uploadingCover) return;
+    tapHaptic();
+    setCoverError("");
+    const handledNatively = showCoverImageContextMenu((action) => {
+      void handleCoverSourceAction(action);
+    });
+    if (!handledNatively) {
+      setUploadMenuOpen(true);
     }
   };
 
@@ -336,7 +432,7 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             />
           ) : null}
           <View className="flex-row flex-wrap items-center gap-2">
-            <Button variant="secondary" onPress={pickCoverImage} disabled={uploadingCover}>
+            <Button variant="secondary" onPress={openCoverSourceMenu} disabled={uploadingCover}>
               {uploadingCover ? (
                 <Spinner size="small" />
               ) : (
@@ -350,13 +446,12 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
               ) : (
                 <Sparkles size={16} color={colors.green500} />
               )}
-              {generatingCover ? "Finding image…" : "Generate image"}
+              {generatingCover ? "Generating…" : "Generate image"}
             </Button>
           </View>
           <Text className="text-xs leading-4 text-muted-foreground">
-            Generate searches free public-domain food photos from the recipe name and shows a few
-            options to pick from. Dismiss ones you don’t like — they won’t come back for this
-            recipe. Enter a name first.
+            Upload a photo by taking a picture, choosing from your camera roll, or pasting an image
+            copied to your clipboard.
           </Text>
           {coverError ? <Text className="text-sm text-destructive">{coverError}</Text> : null}
         </View>
@@ -467,6 +562,40 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
           </Button>
         </View>
       </KeyboardStickyView>
+
+      <Sheet visible={uploadMenuOpen} onClose={() => setUploadMenuOpen(false)}>
+        <Text className="px-1 pb-2 font-sans-semibold text-base">Upload recipe photo</Text>
+        <View className="gap-1">
+          {COVER_IMAGE_SOURCE_ITEMS.map((item) => {
+            const Icon =
+              item.id === "take-photo"
+                ? Camera
+                : item.id === "camera-roll"
+                  ? ImagePlus
+                  : ClipboardPaste;
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={item.label}
+                onPress={() => void handleCoverSourceAction(item.id)}
+                className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-secondary/60"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+                  <Icon size={19} color={colors.foreground} strokeWidth={2} />
+                </View>
+                <View className="min-w-0 flex-1">
+                  <Text className="font-sans-medium text-sm">{item.label}</Text>
+                  <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={1}>
+                    {item.description}
+                  </Text>
+                </View>
+                <ChevronRight size={16} color={colors.faint} />
+              </Pressable>
+            );
+          })}
+        </View>
+      </Sheet>
 
       <CoverImagePickerSheet
         visible={coverPickerOpen}

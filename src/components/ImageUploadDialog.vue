@@ -1,18 +1,10 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger
-} from "@/components/ui/dialog";
-import { mediaUrl } from "@/lib/media";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { UploadSlim } from "@/types";
-import { del, get, getErrorMessage, postFile, toast } from "@/utils";
-import { ImagePlus, Trash2 } from "@lucide/vue";
-import { computed, useTemplateRef, watch } from "vue";
+import { del, getErrorMessage, postFile, toast } from "@/utils";
+import { Camera, ClipboardPaste, ImagePlus, LoaderCircle, Trash2 } from "@lucide/vue";
+import { computed, ref, useTemplateRef } from "vue";
 
 interface Props {
   maxSizeMb?: number;
@@ -20,31 +12,36 @@ interface Props {
 
 const model = defineModel<number | undefined>();
 const props = withDefaults(defineProps<Props>(), { maxSizeMb: 5 });
-const inputRef = useTemplateRef<HTMLInputElement>("fileInput");
+const cameraInputRef = useTemplateRef<HTMLInputElement>("cameraInput");
+const libraryInputRef = useTemplateRef<HTMLInputElement>("libraryInput");
 
 const open = ref(false);
-const loading = ref(false);
 const uploading = ref(false);
 const deleting = ref(false);
-const errorMsg = ref("");
-const fileDetail = ref<UploadSlim>();
 
-const btnText = computed(() => (model.value ? "Change image" : "Upload image"));
-const imageUrl = computed(() => mediaUrl(fileDetail.value?.url, ""));
+const btnText = computed(() => {
+  if (uploading.value) return "Uploading…";
+  return model.value ? "Change photo" : "Upload photo";
+});
 
-function triggerFileInput() {
-  inputRef.value?.click();
+function triggerCameraInput() {
+  open.value = false;
+  cameraInputRef.value?.click();
 }
 
-async function processFile(file: File) {
-  errorMsg.value = "";
+function triggerLibraryInput() {
+  open.value = false;
+  libraryInputRef.value?.click();
+}
+
+async function processFile(file: File, successMessage?: string) {
   const fileSizeMB = file.size / (1024 * 1024);
   if (fileSizeMB > props.maxSizeMb) {
-    errorMsg.value = `Image size exceeds ${props.maxSizeMb}MB limit`;
+    toast.error(`Image size exceeds ${props.maxSizeMb}MB limit.`);
     return;
   }
   if (!file.size) {
-    errorMsg.value = "That file is empty. Pick a different photo.";
+    toast.error("That file is empty. Pick a different photo.");
     return;
   }
 
@@ -53,119 +50,160 @@ async function processFile(file: File) {
   const safeFile =
     safeName === file.name ? file : new File([file], safeName, { type: file.type || "image/jpeg" });
 
-  await clearFile();
   uploading.value = true;
   try {
+    const previousId = model.value;
     const payload = new FormData();
     payload.append("file", safeFile);
-    fileDetail.value = await postFile<UploadSlim>(`upload/`, payload);
-    model.value = fileDetail.value.id;
+    const uploaded = await postFile<UploadSlim>(`upload/`, payload);
+    model.value = uploaded.id;
+    if (previousId && previousId !== uploaded.id) {
+      void del(`/upload/${previousId}/`).catch(() => undefined);
+    }
+    if (successMessage) {
+      toast.success(successMessage);
+    }
   } catch (er) {
     console.error(er);
-    errorMsg.value = getErrorMessage(er, "Couldn’t upload that image.");
-    toast.fromError(er, "Couldn’t upload that image.");
+    toast.fromError(er, getErrorMessage(er, "Couldn’t upload that image."));
+  } finally {
+    uploading.value = false;
   }
-  uploading.value = false;
 }
 
 function handleFileUpload(evt: Event) {
   const input = evt.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (file) processFile(file);
+  if (file) {
+    void processFile(file);
+  }
+  input.value = "";
+}
+
+async function readClipboardFile(): Promise<File | null> {
+  if (navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const ext = imageType.split("/")[1]?.toLowerCase().replace("jpeg", "jpg") || "png";
+          return new File([blob], `clipboard-${Date.now()}.${ext}`, { type: imageType });
+        }
+      }
+    } catch {
+      /* Fall back to text data-URI check */
+    }
+  }
+
+  if (navigator.clipboard?.readText) {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(text);
+      if (match) {
+        const mimeType = match[1]!.toLowerCase();
+        const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        const blob = await (await fetch(text)).blob();
+        return new File([blob], `clipboard-${Date.now()}.${ext}`, { type: mimeType });
+      }
+    } catch {
+      /* Ignore and report no clipboard image found */
+    }
+  }
+
+  return null;
+}
+
+async function pasteFromClipboard() {
+  open.value = false;
+  const file = await readClipboardFile();
+  if (!file) {
+    toast.error("No image found on your clipboard. Copy an image first and try again.");
+    return;
+  }
+  await processFile(file, "Cover photo pasted from clipboard.");
 }
 
 async function clearFile() {
+  open.value = false;
   if (!model.value) return;
   deleting.value = true;
   try {
     await del(`/upload/${model.value}/`);
     model.value = undefined;
-    fileDetail.value = undefined;
   } catch (er) {
     console.error(er);
     toast.fromError(er, "Couldn’t remove that image.");
+  } finally {
+    deleting.value = false;
   }
-  deleting.value = false;
 }
-
-watch(
-  model,
-  async (val) => {
-    if (!val) {
-      fileDetail.value = undefined;
-      if (inputRef.value) inputRef.value.value = "";
-      return;
-    }
-    loading.value = true;
-    try {
-      fileDetail.value = await get(`/upload/${val}/`);
-    } catch (er) {
-      console.error(er);
-      errorMsg.value = getErrorMessage(er, "Couldn’t load that image.");
-      toast.fromError(er, "Couldn’t load that image.");
-    }
-    loading.value = false;
-  },
-  { immediate: true }
-);
 </script>
 
 <template>
-  <Dialog v-model:open="open">
-    <DialogTrigger>
-      <Button type="button" :variant="model ? 'default' : 'outline'" class="border-dashed">
-        <ImagePlus class="size-4" />
-        {{ btnText }}
-      </Button>
-    </DialogTrigger>
-    <DialogContent class="max-w-sm border-border bg-card">
-      <DialogHeader>
-        <DialogTitle>Recipe photo</DialogTitle>
-      </DialogHeader>
-
-      <button
-        type="button"
-        class="flex min-h-[200px] w-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-secondary/40"
-        :disabled="uploading || loading"
-        @click="triggerFileInput"
-      >
-        <img
-          v-if="fileDetail && imageUrl"
-          :src="imageUrl"
-          alt="Recipe cover"
-          class="h-[220px] w-full object-cover"
-        />
-        <div v-else class="flex flex-col items-center gap-2 px-4 py-8 text-center">
-          <ImagePlus class="size-8 text-[#22c55e]" />
-          <p class="text-sm font-semibold">Upload recipe photo</p>
-          <p class="text-xs text-muted-foreground">Tap to browse · JPG, PNG, WEBP</p>
-        </div>
-      </button>
-
-      <p v-if="errorMsg" class="text-sm text-destructive">{{ errorMsg }}</p>
-      <p v-if="uploading || loading" class="text-xs text-muted-foreground">Working…</p>
-
-      <input
-        ref="fileInput"
-        type="file"
-        class="hidden"
-        accept="image/*"
-        @change="handleFileUpload"
-      />
-
-      <DialogFooter class="gap-2 sm:justify-between">
-        <Button
-          v-if="model"
-          type="button"
-          variant="destructive"
-          :disabled="deleting || uploading"
-          @click="clearFile"
-        >
-          <Trash2 class="size-4" />
-          Clear
+  <div>
+    <Popover v-model:open="open">
+      <PopoverTrigger as-child>
+        <Button type="button" variant="secondary" class="gap-1.5" :disabled="uploading || deleting">
+          <LoaderCircle v-if="uploading" class="size-4 animate-spin" />
+          <ImagePlus v-else class="size-4" />
+          {{ btnText }}
         </Button>
-        <Button type="button" :disabled="deleting || uploading" @click="open = false">Done</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      </PopoverTrigger>
+      <PopoverContent align="start" class="w-56 border-border bg-card p-1.5">
+        <div class="flex flex-col gap-0.5">
+          <button
+            type="button"
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-secondary"
+            @click="triggerCameraInput"
+          >
+            <Camera class="size-4 text-muted-foreground" />
+            <span>Take photo</span>
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-secondary"
+            @click="triggerLibraryInput"
+          >
+            <ImagePlus class="size-4 text-muted-foreground" />
+            <span>Camera roll</span>
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-secondary"
+            @click="pasteFromClipboard"
+          >
+            <ClipboardPaste class="size-4 text-muted-foreground" />
+            <span>Clipboard</span>
+          </button>
+          <button
+            v-if="model"
+            type="button"
+            class="mt-0.5 flex w-full items-center gap-2.5 rounded-lg border-t border-border px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-secondary"
+            @click="clearFile"
+          >
+            <Trash2 class="size-4" />
+            <span>Remove photo</span>
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+
+    <input
+      ref="cameraInput"
+      type="file"
+      class="hidden"
+      accept="image/*"
+      capture="environment"
+      @change="handleFileUpload"
+    />
+    <input
+      ref="libraryInput"
+      type="file"
+      class="hidden"
+      accept="image/*"
+      @change="handleFileUpload"
+    />
+  </div>
 </template>

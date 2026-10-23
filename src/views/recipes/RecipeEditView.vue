@@ -306,13 +306,12 @@ watch(coverRecipeKey, (key) => {
           >
             <LoaderCircle v-if="generatingCover" class="size-4 animate-spin" />
             <Sparkles v-else class="size-4 text-[#22c55e]" />
-            {{ generatingCover ? "Finding image…" : "Generate image" }}
+            {{ generatingCover ? "Generating…" : "Generate image" }}
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          Generate searches free public-domain food photos from the recipe name and shows a few
-          options to pick from. Dismiss ones you don’t like — they won’t come back for this recipe.
-          Enter a name first.
+          Upload a photo by taking a picture, choosing from your camera roll, or pasting an image
+          copied to your clipboard.
         </p>
         <p v-if="coverError" class="text-sm text-destructive">{{ coverError }}</p>
       </div>

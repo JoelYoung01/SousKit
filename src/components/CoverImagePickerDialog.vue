@@ -70,8 +70,8 @@ function dismissOption(event: Event, option: RecipeCoverOption) {
       <DialogHeader>
         <DialogTitle>Choose a cover photo</DialogTitle>
         <DialogDescription>
-          Free public-domain food photos matched to this recipe. Tap one to use it, or dismiss
-          photos you don’t want — Search again won’t show them for this recipe.
+          Tap a generated option to use it, or dismiss photos you don’t want — Search again won’t
+          show them for this recipe.
         </DialogDescription>
       </DialogHeader>
 

@@ -1,9 +1,9 @@
 import type { UploadSlim } from "@/types";
 import { Platform } from "react-native";
-import { File as ExpoFile, UploadType } from "expo-file-system";
+import { File as ExpoFile, Paths, UploadType } from "expo-file-system";
 import { API_URL } from "@/config";
 import { queryClient } from "@/lib/query-client";
-import { defaultUploadFileName, inferImageMimeType } from "@/lib/upload-media";
+import { defaultUploadFileName, inferImageMimeType, parseImageDataUri } from "@/lib/upload-media";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, postFile } from "./client";
 import { parseApiErrorBody } from "./errors";
@@ -42,37 +42,58 @@ function throwForUploadResponse(status: number, bodyText: string): never {
 
 /** Upload via expo-file-system so iOS uses native multipart networking (RN fetch FormData is flaky). */
 async function uploadNative(asset: PickedImage): Promise<UploadSlim> {
-  const name = defaultUploadFileName(asset.fileName, asset.mimeType);
-  const type = inferImageMimeType(name, asset.mimeType);
+  const dataUri = parseImageDataUri(asset.uri);
+  const name = defaultUploadFileName(asset.fileName, asset.mimeType ?? dataUri?.mimeType);
+  const type = inferImageMimeType(name, asset.mimeType ?? dataUri?.mimeType);
   const token = useSessionStore.getState().token;
-  const file = new ExpoFile(asset.uri);
 
-  if (!file.exists) {
-    throw new ApiError("Could not read the selected photo.", 400, {
-      userMessage: "Could not read the selected photo. Try choosing a different image."
-    });
+  let file: ExpoFile;
+  let cleanupTempFile = false;
+  if (dataUri) {
+    const cacheDir = Paths?.cache ?? "file:///tmp";
+    file = new ExpoFile(cacheDir, `clipboard-${Date.now()}-${name}`);
+    file.write(dataUri.base64, { encoding: "base64" });
+    cleanupTempFile = true;
+  } else {
+    file = new ExpoFile(asset.uri);
   }
 
-  let result;
   try {
-    result = await file.upload(`${API_URL}/upload/`, {
-      httpMethod: "POST",
-      uploadType: UploadType.MULTIPART,
-      fieldName: "file",
-      mimeType: type,
-      sessionType: "foreground",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-  } catch {
-    throw new ApiError(NETWORK_MESSAGE, 503, { userMessage: NETWORK_MESSAGE });
-  }
+    if (!file.exists) {
+      throw new ApiError("Could not read the selected photo.", 400, {
+        userMessage: "Could not read the selected photo. Try choosing a different image."
+      });
+    }
 
-  clearSessionOnUnauthorized(result.status, token);
-  if (result.status >= 400) {
-    throwForUploadResponse(result.status, result.body);
-  }
+    let result;
+    try {
+      result = await file.upload(`${API_URL}/upload/`, {
+        httpMethod: "POST",
+        uploadType: UploadType.MULTIPART,
+        fieldName: "file",
+        mimeType: type,
+        sessionType: "foreground",
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+    } catch {
+      throw new ApiError(NETWORK_MESSAGE, 503, { userMessage: NETWORK_MESSAGE });
+    }
 
-  return JSON.parse(result.body) as UploadSlim;
+    clearSessionOnUnauthorized(result.status, token);
+    if (result.status >= 400) {
+      throwForUploadResponse(result.status, result.body);
+    }
+
+    return JSON.parse(result.body) as UploadSlim;
+  } finally {
+    if (cleanupTempFile) {
+      try {
+        if (file.exists) file.delete();
+      } catch {
+        /* best-effort cache cleanup */
+      }
+    }
+  }
 }
 
 /** Upload a picked image as multipart form data → Upload record. */

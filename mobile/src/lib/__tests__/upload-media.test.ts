@@ -1,4 +1,9 @@
-import { defaultUploadFileName, inferImageMimeType } from "../upload-media";
+import {
+  defaultUploadFileName,
+  inferImageMimeType,
+  normalizeClipboardImageData,
+  parseImageDataUri
+} from "../upload-media";
 
 describe("inferImageMimeType", () => {
   it("prefers the picker mime type", () => {
@@ -26,5 +31,41 @@ describe("defaultUploadFileName", () => {
 
   it("uses the mime type extension when fileName is missing", () => {
     expect(defaultUploadFileName(null, "image/png")).toMatch(/^photo-\d+\.png$/);
+  });
+});
+
+describe("parseImageDataUri", () => {
+  it("parses a base64 png data URI", () => {
+    const parsed = parseImageDataUri("data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==");
+    expect(parsed).toEqual({
+      dataUri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+      mimeType: "image/png",
+      extension: "png",
+      base64: "iVBORw0KGgoAAAANSUhEUg=="
+    });
+  });
+
+  it("normalizes image/jpg to image/jpeg", () => {
+    const parsed = parseImageDataUri("data:image/jpg;base64,iVBORw0KGgoAAAANSUhEUg==");
+    expect(parsed?.mimeType).toBe("image/jpeg");
+    expect(parsed?.extension).toBe("jpg");
+  });
+
+  it("returns null for non-image or plain strings", () => {
+    expect(parseImageDataUri("https://example.com/photo.jpg")).toBeNull();
+    expect(parseImageDataUri("data:text/plain;base64,SGVsbG8=")).toBeNull();
+    expect(parseImageDataUri("")).toBeNull();
+  });
+});
+
+describe("normalizeClipboardImageData", () => {
+  it("wraps raw base64 strings into a data URI", () => {
+    const parsed = normalizeClipboardImageData("iVBORw0KGgoAAAANSUhEUg==");
+    expect(parsed).toEqual({
+      dataUri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+      mimeType: "image/png",
+      extension: "png",
+      base64: "iVBORw0KGgoAAAANSUhEUg=="
+    });
   });
 });
