@@ -1,4 +1,5 @@
 import type {
+  MealPlanWizardNightCommitItem,
   MealPlanWizardPrefs,
   MealPlanWizardProgressEvent,
   MealPlanWizardSession,
@@ -58,6 +59,12 @@ export function commitWizard(
   return post<PlannedRecipeDetail[]>(`/meal-plan-wizard/sessions/${sessionId}/commit/`, {
     plan: opts?.plan ?? true
   });
+}
+
+export function commitWizardNights(
+  nights: MealPlanWizardNightCommitItem[]
+): Promise<PlannedRecipeDetail[]> {
+  return post<PlannedRecipeDetail[]>("/meal-plan-wizard/commit-plan/", { nights });
 }
 
 /** Streamed ideation — emits progress events until the stream closes. */

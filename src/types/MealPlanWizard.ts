@@ -72,3 +72,13 @@ export const emptyWizardPrefs = (): MealPlanWizardPrefs => ({
   cuisine_notes: "",
   extra_notes: ""
 });
+
+export interface MealPlanWizardNightCommitItem {
+  day: string;
+  recipe_id?: number | null;
+  built_recipe?: MealPlanWizardBuiltRecipe | null;
+}
+
+export interface MealPlanWizardPlanCommitRequest {
+  nights: MealPlanWizardNightCommitItem[];
+}

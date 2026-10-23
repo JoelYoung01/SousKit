@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import HomeWeekStrip from "@/components/HomeWeekStrip.vue";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatPrepTime, mediaUrl, startOfDay, toDateKey } from "@/lib/media";
+import { addDays, mediaUrl, startOfDay, startOfWeekMonday, toDateKey } from "@/lib/media";
 import { paths } from "@/sitemap";
 import { useGroceryStore } from "@/stores/grocery";
 import { usePlannerStore } from "@/stores/planner";
 import { useRecipesStore } from "@/stores/recipes";
 import { useSessionStore } from "@/stores/session";
 import { toast } from "@/utils";
-import { Plus, Search, ShoppingCart, Sparkles, User } from "@lucide/vue";
+import { CalendarDays, Plus, Search, ShoppingCart, Sparkles, User } from "@lucide/vue";
 import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -23,38 +22,15 @@ const plannerStore = usePlannerStore();
 
 const loading = ref(true);
 const plansReady = ref(false);
-const visibleWeekDays = ref<Date[]>([]);
-const weekRange = ref<{ start: Date; end: Date } | null>(null);
 
 const today = startOfDay();
+const thisWeekStart = startOfWeekMonday(today);
+const thisWeekEnd = addDays(thisWeekStart, 6);
 
 const weekdayName = computed(() => today.toLocaleDateString(undefined, { weekday: "long" }));
 
 /** Derived from the shared planner store so KeepAlive tabs stay in sync. */
-const weekPlans = computed(() => {
-  if (!weekRange.value) return [];
-  return plannerStore.plansInRange(weekRange.value.start, weekRange.value.end);
-});
-
-const plannedKeys = computed(() => {
-  const set = new Set<string>();
-  for (const p of weekPlans.value) {
-    set.add(p.planned_for.slice(0, 10));
-  }
-  return set;
-});
-
-const plannedCount = computed(() => {
-  let n = 0;
-  for (const d of visibleWeekDays.value) {
-    if (plannedKeys.value.has(toDateKey(d))) n += 1;
-  }
-  return n;
-});
-
-const gapDays = computed(() =>
-  visibleWeekDays.value.filter((d) => !plannedKeys.value.has(toDateKey(d)))
-);
+const weekPlans = computed(() => plannerStore.plansInRange(thisWeekStart, thisWeekEnd));
 
 const tonight = computed(() => {
   const key = toDateKey(today);
@@ -62,25 +38,20 @@ const tonight = computed(() => {
 });
 
 const tonightImage = computed(() => mediaUrl(tonight.value?.recipe.cover_image?.url));
-const tonightMeta = computed(() => {
-  if (!tonight.value) return "";
-  const prep = formatPrepTime(tonight.value.recipe.prep_time);
-  return prep || "Tonight’s plan";
-});
 
 const showHeroSkeleton = computed(() => loading.value && !plansReady.value && !tonight.value);
 
 const recipeCount = computed(() => recipesStore.count ?? 0);
 const groceryCount = computed(() => groceryStore.activeCount ?? 0);
+const hasPendingGrocery = computed(() => groceryCount.value > 0);
 
-async function loadWeekPlans(rangeStart: Date, rangeEnd: Date) {
-  weekRange.value = { start: rangeStart, end: rangeEnd };
+async function loadWeekPlans() {
   try {
-    await plannerStore.ensureRange(rangeStart, rangeEnd);
+    await plannerStore.ensureRange(thisWeekStart, thisWeekEnd);
     plansReady.value = true;
   } catch (er) {
     console.error(er);
-    toast.fromError(er, "Couldn’t load this week’s plan.");
+    toast.fromError(er, "Couldn’t load tonight’s plan.");
     plansReady.value = true;
   } finally {
     loading.value = false;
@@ -96,24 +67,6 @@ async function loadBadges() {
   }
 }
 
-function onWeekChange(_weekStart: Date, days: Date[], rangeStart: Date, rangeEnd: Date) {
-  visibleWeekDays.value = days;
-  void loadWeekPlans(rangeStart, rangeEnd);
-}
-
-function openDay(date: Date) {
-  router.push({ path: paths.planner, query: { date: toDateKey(date) } });
-}
-
-function openFillGaps() {
-  router.push({
-    path: paths.plannerFill,
-    query: {
-      days: gapDays.value.map(toDateKey).join(",")
-    }
-  });
-}
-
 function cookTonight() {
   if (!tonight.value) {
     router.push(paths.planner);
@@ -126,14 +79,11 @@ function cookTonight() {
 }
 
 async function refreshHome() {
-  await loadBadges();
-  if (weekRange.value) {
-    await loadWeekPlans(weekRange.value.start, weekRange.value.end);
-  }
+  await Promise.all([loadBadges(), loadWeekPlans()]);
 }
 
 onMounted(() => {
-  void loadBadges();
+  void refreshHome();
 });
 onActivated(() => {
   void refreshHome();
@@ -143,9 +93,7 @@ onActivated(() => {
 watch(
   () => plannerStore.revision,
   () => {
-    if (weekRange.value) {
-      void loadWeekPlans(weekRange.value.start, weekRange.value.end);
-    }
+    void loadWeekPlans();
   }
 );
 </script>
@@ -193,17 +141,14 @@ watch(
             <p class="mt-0.5 text-xl font-bold tracking-tight leading-tight text-foreground">
               {{ tonight.recipe.name }}
             </p>
-            <p class="mt-0.5 text-xs text-foreground/75">{{ tonightMeta }}</p>
           </template>
           <template v-else-if="showHeroSkeleton">
             <Skeleton class="mt-1.5 h-6 w-40 bg-foreground/20" />
-            <Skeleton class="mt-2 h-3 w-28 bg-foreground/15" />
           </template>
           <template v-else>
             <p class="mt-0.5 text-xl font-bold tracking-tight leading-tight text-foreground">
               Nothing planned
             </p>
-            <p class="mt-0.5 text-xs text-foreground/75">Pick something for tonight</p>
           </template>
         </div>
         <Button
@@ -215,27 +160,20 @@ watch(
       </div>
     </section>
 
-    <!-- Week strip -->
-    <section class="px-5 pt-4">
-      <HomeWeekStrip
-        :planned-keys="plannedKeys"
-        @week-change="onWeekChange"
-        @select-day="openDay"
-      />
-      <div class="mt-2 flex items-center justify-between">
-        <p class="text-xs text-muted-foreground">{{ plannedCount }} of 7 dinners planned</p>
-        <button
-          type="button"
-          class="text-[12.5px] font-semibold text-[#22c55e] transition-opacity active:opacity-70"
-          @click="openFillGaps"
-        >
-          Fill the gaps →
-        </button>
-      </div>
-    </section>
-
-    <!-- Action cards: Create / Import / Find / Grocery — icons muted so labels lead -->
+    <!-- Action cards: Meal Plan / Create / Import / Dynamic (Grocery or Find) -->
     <section class="grid grid-cols-2 gap-2 px-5 pt-4">
+      <button
+        type="button"
+        class="flex min-h-[104px] flex-col items-start justify-between rounded-xl border border-border bg-card p-3.5 text-left transition-opacity active:opacity-80"
+        @click="router.push(paths.plannerFill)"
+      >
+        <CalendarDays class="size-[18px] shrink-0 text-[#22c55e]/55" :stroke-width="2" />
+        <span class="mt-3">
+          <span class="block text-sm font-semibold">Meal Plan</span>
+          <span class="mt-0.5 block text-[11.5px] text-faint">Plan your nights</span>
+        </span>
+      </button>
+
       <button
         type="button"
         class="flex min-h-[104px] flex-col items-start justify-between rounded-xl border border-border bg-card p-3.5 text-left transition-opacity active:opacity-80"
@@ -244,7 +182,7 @@ watch(
         <Sparkles class="size-[18px] shrink-0 text-[#22c55e]/55" :stroke-width="2" />
         <span class="mt-3">
           <span class="block text-sm font-semibold">Create</span>
-          <span class="mt-0.5 block text-[11.5px] text-faint">AI recipe</span>
+          <span class="mt-0.5 block text-[11.5px] text-faint">Cook right now</span>
         </span>
       </button>
 
@@ -261,6 +199,24 @@ watch(
       </button>
 
       <button
+        v-if="hasPendingGrocery"
+        type="button"
+        class="flex min-h-[104px] flex-col items-start justify-between rounded-xl border border-border bg-card p-3.5 text-left transition-opacity active:opacity-80"
+        @click="router.push(paths.list)"
+      >
+        <ShoppingCart class="size-[18px] shrink-0 text-[#22c55e]/55" :stroke-width="2" />
+        <span class="mt-3">
+          <span class="block text-sm font-semibold">Grocery</span>
+          <span
+            class="mt-0.5 inline-flex rounded-full border border-[rgba(34,197,94,0.35)] bg-[rgba(34,197,94,0.12)] px-2 py-0.5 text-[11px] font-bold text-[#4ade80]"
+          >
+            {{ groceryCount }}
+          </span>
+        </span>
+      </button>
+
+      <button
+        v-else
         type="button"
         class="flex min-h-[104px] flex-col items-start justify-between rounded-xl border border-border bg-card p-3.5 text-left transition-opacity active:opacity-80"
         @click="router.push(paths.recipes)"
@@ -273,23 +229,6 @@ watch(
               <Skeleton class="inline-block h-3 w-10 align-middle" />
             </template>
             <template v-else>{{ recipeCount }} saved</template>
-          </span>
-        </span>
-      </button>
-
-      <button
-        type="button"
-        class="flex min-h-[104px] flex-col items-start justify-between rounded-xl border border-border bg-card p-3.5 text-left transition-opacity active:opacity-80"
-        @click="router.push(paths.list)"
-      >
-        <ShoppingCart class="size-[18px] shrink-0 text-[#22c55e]/55" :stroke-width="2" />
-        <span class="mt-3">
-          <span class="block text-sm font-semibold">Grocery</span>
-          <span
-            class="mt-0.5 inline-flex rounded-full border border-[rgba(34,197,94,0.35)] bg-[rgba(34,197,94,0.12)] px-2 py-0.5 text-[11px] font-bold text-[#4ade80]"
-          >
-            <template v-if="groceryStore.activeCount === null">·</template>
-            <template v-else>{{ groceryCount }}</template>
           </span>
         </span>
       </button>
