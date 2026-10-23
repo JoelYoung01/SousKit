@@ -76,10 +76,7 @@ export const useGroceryStore = defineStore("grocery", () => {
     activeCount.value = items.value.filter((i) => !i.dismissed && !i.deleted).length;
   }
 
-  async function setStatus(
-    item: GroceryItem,
-    status: "dismissed" | "deleted" | "restored" | null
-  ) {
+  async function setStatus(item: GroceryItem, status: "dismissed" | "deleted" | "restored" | null) {
     const previous = { dismissed: item.dismissed, deleted: item.deleted };
     patchLocal(item.key, {
       dismissed: status === "dismissed",

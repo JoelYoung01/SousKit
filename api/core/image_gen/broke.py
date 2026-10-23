@@ -18,7 +18,11 @@ from api.core.logging import logger
 
 DEFAULT_UA = "SousKit/0.0.1 (recipe cover search; https://github.com/local)"
 MAX_BYTES = 8 * 1024 * 1024  # 8 MiB safety cap
-TIMEOUT_S = 20
+SEARCH_TIMEOUT_S = 3.5
+DOWNLOAD_TIMEOUT_S = 5.0
+MAX_QUERIES_SINGLE = 2
+MAX_QUERIES_MULTI = 4
+MAX_DOWNLOAD_ATTEMPTS_PER_QUERY = 2
 # Hosts that commonly block hotlinking / bots — try others first.
 DEPRIORITIZED_HOST_FRAGMENTS = (
     "cdn.stocksnap.io",
@@ -39,10 +43,14 @@ class BrokeImageSearchClient(ImageGenClient):
         licenses: str = "cc0,pdm",
         page_size: int = 20,
         session: requests.Session | None = None,
+        search_timeout_s: float = SEARCH_TIMEOUT_S,
+        download_timeout_s: float = DOWNLOAD_TIMEOUT_S,
     ):
         self.base_url = base_url.rstrip("/")
         self.licenses = licenses
         self.page_size = page_size
+        self.search_timeout_s = search_timeout_s
+        self.download_timeout_s = download_timeout_s
         self.session = session or requests.Session()
         self.session.headers.setdefault("User-Agent", DEFAULT_UA)
 
@@ -77,17 +85,29 @@ class BrokeImageSearchClient(ImageGenClient):
             return []
 
         excluded = {k.strip() for k in (exclude_keys or set()) if k and k.strip()}
-        queries = self._query_variants(prompt, recipe_title, keywords)
+        max_queries = MAX_QUERIES_SINGLE if limit <= 1 else MAX_QUERIES_MULTI
+        queries = self._query_variants(prompt, recipe_title, keywords)[:max_queries]
         seen_urls: set[str] = set()
         seen_keys: set[str] = set(excluded)
         chosen: list[ImageGenResult] = []
+        max_downloads_per_query = max(MAX_DOWNLOAD_ATTEMPTS_PER_QUERY, limit + 1)
 
         for query in queries:
             if len(chosen) >= limit:
                 break
-            candidates = self._search(query)
+            candidates, timed_out = self._search(query)
+            if timed_out:
+                logger.info(
+                    "Openverse search timed out on %r; skipping remaining queries",
+                    query,
+                )
+                break
+            downloads_attempted = 0
             for hit in candidates:
-                if len(chosen) >= limit:
+                if (
+                    len(chosen) >= limit
+                    or downloads_attempted >= max_downloads_per_query
+                ):
                     break
                 url = hit.get("url")
                 if not url or url in seen_urls:
@@ -98,6 +118,7 @@ class BrokeImageSearchClient(ImageGenClient):
                 seen_urls.add(url)
                 if skip_key:
                     seen_keys.add(skip_key)
+                downloads_attempted += 1
                 try:
                     result = self._download(url, hit)
                 except Exception as exc:  # noqa: BLE001 — try next candidate
@@ -152,37 +173,35 @@ class BrokeImageSearchClient(ImageGenClient):
             t for t in title.lower().replace(",", " ").split() if len(t) > 3
         ]
 
-        # 1) Full title — strongest signal when the user renames the recipe.
-        if title:
-            add(f"{title} food")
-            add(title)
-            add(f"{title} dinner plated")
-
-        # 2) Dish-form token from the title (tacos, curry, pasta…).
+        # 1) Dish-form + food (e.g. "potatoes food", "tacos food") — short queries
+        # hit Openverse's CDN cache reliably and return actual results, whereas full
+        # 8-word generated recipe titles return 0 hits and waste rate-limit budget.
         if title_tokens:
             add(f"{title_tokens[-1]} food")
             if len(title_tokens) >= 2:
                 add(f"{title_tokens[-2]} {title_tokens[-1]} food")
             if keys:
-                add(f"{keys[0]} {title_tokens[-1]}")
+                add(f"{keys[0]} {title_tokens[-1]} food")
 
-        # 3) Shared prompt (may already be title- or ingredient-led).
-        add(prompt)
+        # 2) Full title when short (<= 4 words), or when dish-form missed.
+        if title and len(title.split()) <= 4:
+            add(f"{title} food")
+            add(title)
 
-        # 4) Ingredient fallbacks when title search is thin.
+        # 3) Ingredient fallbacks when title search is thin.
         if len(keys) >= 2:
             add(f"{keys[0]} {keys[1]} food")
-            add(f"{keys[0]} {keys[1]} dinner")
         if keys:
-            add(f"{keys[0]} dinner food")
             add(f"{keys[0]} food")
-        if len(keys) >= 3:
-            add(f"{keys[0]} {keys[1]} {keys[2]} food")
 
+        # 4) Full title / prompt as late fallbacks.
+        if title:
+            add(f"{title} food")
+        add(prompt)
         add("homemade dinner plated food")
         return variants
 
-    def _search(self, query: str) -> list[dict[str, Any]]:
+    def _search(self, query: str) -> tuple[list[dict[str, Any]], bool]:
         params = {
             "q": query,
             "license": self.licenses,
@@ -194,13 +213,18 @@ class BrokeImageSearchClient(ImageGenClient):
             resp = self.session.get(
                 url,
                 params=params,
-                timeout=TIMEOUT_S,
+                timeout=self.search_timeout_s,
                 headers={"Accept": "application/json"},
             )
             resp.raise_for_status()
+        except requests.Timeout as exc:
+            logger.warning("Openverse search timed out for %r: %s", query, exc)
+            return [], True
         except requests.RequestException as exc:
             logger.warning("Openverse search failed for %r: %s", query, exc)
-            return []
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            should_abort = status_code in (429, 502, 503, 504)
+            return [], should_abort
 
         data = resp.json() if resp.content else {}
         results = list(data.get("results") or [])
@@ -212,12 +236,12 @@ class BrokeImageSearchClient(ImageGenClient):
             return (int(deprioritized), -area)
 
         results.sort(key=rank_key)
-        return results
+        return results, False
 
     def _download(self, url: str, hit: dict[str, Any]) -> ImageGenResult | None:
         resp = self.session.get(
             url,
-            timeout=TIMEOUT_S,
+            timeout=self.download_timeout_s,
             stream=True,
             headers={"Accept": "image/*,*/*;q=0.8"},
         )
