@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/EmptyState";
+import { GroceryExportSheet } from "@/components/grocery/GroceryExportSheet";
 import { SwipeRow } from "@/components/SwipeRow";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,7 +23,7 @@ import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
 import { GROCERY_WINDOW_OPTIONS, type GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
-import { CalendarDays, ChevronDown, EyeOff, Plus, ShoppingCart } from "lucide-react-native";
+import { CalendarDays, ChevronDown, EyeOff, Plus, Share, ShoppingCart } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { ScrollView } from "react-native-gesture-handler";
@@ -36,6 +37,7 @@ export default function GroceryListScreen() {
   const insets = useSafeAreaInsets();
   const [showDismissed, setShowDismissed] = useState(false);
   const [showWindowPicker, setShowWindowPicker] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [editingItem, setEditingItem] = useState<GroceryItem | null>(null);
   const [editName, setEditName] = useState("");
@@ -244,23 +246,36 @@ export default function GroceryListScreen() {
           <Text className="font-sans-bold text-xl">Grocery</Text>
           <Text className="mt-1 text-sm text-muted-foreground">{windowDescription}</Text>
         </View>
-        <Button
-          variant="outline"
-          size="sm"
-          className={showDismissed ? "border-[rgba(34,197,94,0.45)] bg-card" : "bg-card"}
-          onPress={() => setShowDismissed((v) => !v)}
-        >
-          <EyeOff size={14} color={showDismissed ? colors.green400 : colors.foreground} />
-          <Text
-            className={
-              showDismissed
-                ? "font-sans-semibold text-xs text-[#4ade80]"
-                : "font-sans-semibold text-xs"
-            }
+        <View className="flex-row flex-wrap items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-card"
+            accessibilityLabel="Export grocery list"
+            disabled={activeCount === 0 && !showSkeleton}
+            onPress={() => setShowExport(true)}
           >
-            {showDismissed ? "Hide dismissed" : "Show dismissed"}
-          </Text>
-        </Button>
+            <Share size={14} color={colors.foreground} />
+            <Text className="font-sans-semibold text-xs">Export</Text>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className={showDismissed ? "border-[rgba(34,197,94,0.45)] bg-card" : "bg-card"}
+            onPress={() => setShowDismissed((v) => !v)}
+          >
+            <EyeOff size={14} color={showDismissed ? colors.green400 : colors.foreground} />
+            <Text
+              className={
+                showDismissed
+                  ? "font-sans-semibold text-xs text-[#4ade80]"
+                  : "font-sans-semibold text-xs"
+              }
+            >
+              {showDismissed ? "Hide dismissed" : "Show dismissed"}
+            </Text>
+          </Button>
+        </View>
       </View>
 
       <View className="mt-2 flex-row">
@@ -527,6 +542,12 @@ export default function GroceryListScreen() {
           </View>
         </View>
       </Sheet>
+
+      <GroceryExportSheet
+        visible={showExport}
+        onClose={() => setShowExport(false)}
+        items={items}
+      />
     </ScrollView>
   );
 }
