@@ -1092,7 +1092,7 @@ class MealPlanWizardPipeline:
             ),
             0.08,
         )
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
 
         household = ensure_user_household(db, user)
         created_recipes: list[Recipe] = []
@@ -1112,7 +1112,7 @@ class MealPlanWizardPipeline:
                     round(base_prog + step_span * 0.15, 2),
                     {"day": day, "title": built.title, "index": idx, "total": total},
                 )
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.18)
 
                 db_recipe = Recipe(
                     created_by_id=user.id,
@@ -1149,7 +1149,7 @@ class MealPlanWizardPipeline:
                     round(base_prog + step_span * 0.45, 2),
                     {"day": day, "title": built.title, "index": idx, "total": total},
                 )
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.15)
 
                 cover_id = await asyncio.to_thread(
                     self._maybe_attach_cover, db, user, built
@@ -1179,7 +1179,7 @@ class MealPlanWizardPipeline:
                 round(base_prog + step_span * 0.85, 2),
                 {"day": day, "title": built.title, "recipe_id": recipe_id},
             )
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.18)
 
             day_start = datetime.fromisoformat(f"{day}T00:00:00").replace(tzinfo=UTC)
             day_end = datetime.fromisoformat(f"{day}T23:59:59.999999").replace(
@@ -1218,7 +1218,7 @@ class MealPlanWizardPipeline:
                 ),
                 0.9,
             )
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.18)
             refresh_recipes_embeddings(db, created_recipes, commit=True)
 
         session.step = "committed"
@@ -1238,6 +1238,7 @@ class MealPlanWizardPipeline:
                 "recipe_ids": created_recipe_ids,
             },
         )
+        await asyncio.sleep(0.25)
 
     async def run_commit_nights(
         self,
@@ -1258,7 +1259,7 @@ class MealPlanWizardPipeline:
             ),
             progress=0.06,
         )
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
 
         household = ensure_user_household(db, user)
         created_recipes: list[Recipe] = []
@@ -1332,7 +1333,7 @@ class MealPlanWizardPipeline:
                             "total": total,
                         },
                     )
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.18)
 
                     db_recipe = Recipe(
                         created_by_id=user.id,
@@ -1373,7 +1374,7 @@ class MealPlanWizardPipeline:
                             "total": total,
                         },
                     )
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.15)
 
                     cover_id = await asyncio.to_thread(
                         self._maybe_attach_cover, db, user, built
@@ -1402,7 +1403,7 @@ class MealPlanWizardPipeline:
                     "total": total,
                 },
             )
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.18)
 
             existing_plans = db.exec(
                 select(PlannedRecipe).where(
@@ -1439,7 +1440,7 @@ class MealPlanWizardPipeline:
                 ),
                 progress=0.9,
             )
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.18)
             refresh_recipes_embeddings(db, created_recipes, commit=True)
 
         yield ProgressEvent(
@@ -1455,6 +1456,7 @@ class MealPlanWizardPipeline:
                 "saved_days": saved_days,
             },
         )
+        await asyncio.sleep(0.25)
 
     @staticmethod
     def _coerce_built_recipe(
