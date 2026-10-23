@@ -13,24 +13,80 @@ import type {
   GroceryItemStatus,
   GroceryListResponse,
   GroceryManualItemCreate,
-  GroceryManualItemUpdate
+  GroceryManualItemUpdate,
+  GroceryWindowChoice
 } from "@/types";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { create } from "zustand";
 
-const LIST_KEY = ["grocery", "list"] as const;
+const WINDOW_STORAGE_KEY = "souskit.grocery-window-days.v1";
+
+interface GroceryWindowState {
+  windowDays: GroceryWindowChoice;
+  hydrated: boolean;
+  hydrate: () => Promise<void>;
+  setWindowDays: (days: GroceryWindowChoice) => void;
+}
+
+let hydrateStarted = false;
+
+/** Test hook — lets Jest re-run hydrate in isolation. */
+export function resetGroceryWindowHydrateForTests() {
+  hydrateStarted = false;
+}
+
+export const useGroceryWindowStore = create<GroceryWindowState>((set) => ({
+  windowDays: null,
+  hydrated: false,
+  async hydrate() {
+    if (hydrateStarted) return;
+    hydrateStarted = true;
+    try {
+      const raw = await AsyncStorage.getItem(WINDOW_STORAGE_KEY);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed === null || (typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 1)) {
+          set({ windowDays: parsed, hydrated: true });
+          return;
+        }
+      }
+    } catch {
+      /* ignore corrupted storage */
+    }
+    set({ hydrated: true });
+  },
+  setWindowDays(days) {
+    set({ windowDays: days });
+    void AsyncStorage.setItem(WINDOW_STORAGE_KEY, JSON.stringify(days));
+  }
+}));
+
+export function useGroceryWindow() {
+  const windowDays = useGroceryWindowStore((s) => s.windowDays);
+  const setWindowDays = useGroceryWindowStore((s) => s.setWindowDays);
+  void useGroceryWindowStore.getState().hydrate();
+  return { windowDays, setWindowDays };
+}
+
+function listKey(days: GroceryWindowChoice) {
+  return ["grocery", "list", days] as const;
+}
 
 export function useGroceryList() {
+  const { windowDays } = useGroceryWindow();
   return useQuery({
-    queryKey: LIST_KEY,
-    queryFn: fetchGroceryList,
+    queryKey: listKey(windowDays),
+    queryFn: () => fetchGroceryList(windowDays),
     refetchOnMount: "always"
   });
 }
 
 export function useGrocerySummary() {
+  const { windowDays } = useGroceryWindow();
   return useQuery({
-    queryKey: ["grocery", "summary"],
-    queryFn: fetchGrocerySummary,
+    queryKey: ["grocery", "summary", windowDays],
+    queryFn: () => fetchGrocerySummary(windowDays),
     select: (r) => r.active_count
   });
 }
@@ -41,10 +97,11 @@ export function useSetGroceryStatus() {
     mutationFn: ({ item, status }: { item: GroceryItem; status: GroceryItemStatus }) =>
       setGroceryItemStatus(item.key, status),
     onMutate: async ({ item, status }) => {
-      await queryClient.cancelQueries({ queryKey: LIST_KEY });
-      const previous = queryClient.getQueryData<GroceryListResponse>(LIST_KEY);
+      const key = listKey(useGroceryWindowStore.getState().windowDays);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<GroceryListResponse>(key);
       if (previous) {
-        queryClient.setQueryData<GroceryListResponse>(LIST_KEY, {
+        queryClient.setQueryData<GroceryListResponse>(key, {
           ...previous,
           items: previous.items.map((i) =>
             i.key === item.key
@@ -53,10 +110,12 @@ export function useSetGroceryStatus() {
           )
         });
       }
-      return { previous };
+      return { previous, key };
     },
     onError: (error, _vars, context) => {
-      if (context?.previous) queryClient.setQueryData(LIST_KEY, context.previous);
+      if (context?.previous && context.key) {
+        queryClient.setQueryData(context.key, context.previous);
+      }
       toast.fromError(error, "Could not update the item.");
     },
     onSettled: () => {

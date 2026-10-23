@@ -329,12 +329,14 @@ class GroceryItem(BaseModel):
 class GroceryListResponse(BaseModel):
     window_start: datetime
     window_end: datetime
+    window_days: int
     items: list[GroceryItem]
 
 
 class GrocerySummaryResponse(BaseModel):
     window_start: datetime
     window_end: datetime
+    window_days: int
     active_count: int
 
 

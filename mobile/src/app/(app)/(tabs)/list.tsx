@@ -10,6 +10,7 @@ import {
   useCreateManualGroceryItem,
   useDeleteManualGroceryItem,
   useGroceryList,
+  useGroceryWindow,
   useSetGroceryStatus,
   useUpdateManualGroceryItem
 } from "@/hooks/use-grocery";
@@ -19,9 +20,9 @@ import { getErrorMessage } from "@/api/errors";
 import { showGroceryItemContextMenu } from "@/lib/grocery-item-menu";
 import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
-import type { GroceryItem } from "@/types";
+import { GROCERY_WINDOW_OPTIONS, type GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
-import { EyeOff, Plus, ShoppingCart } from "lucide-react-native";
+import { CalendarDays, ChevronDown, EyeOff, Plus, ShoppingCart } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { ScrollView } from "react-native-gesture-handler";
@@ -34,12 +35,14 @@ export default function GroceryListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showWindowPicker, setShowWindowPicker] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [editingItem, setEditingItem] = useState<GroceryItem | null>(null);
   const [editName, setEditName] = useState("");
   const [pendingHideKeys, setPendingHideKeys] = useState<Set<string>>(() => new Set());
   const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  const { windowDays, setWindowDays } = useGroceryWindow();
   const list = useGroceryList();
   const setStatus = useSetGroceryStatus();
   const createManual = useCreateManualGroceryItem();
@@ -73,6 +76,17 @@ export default function GroceryListScreen() {
     if (!list.data?.window_start || !list.data?.window_end) return "";
     return formatShortRange(new Date(list.data.window_start), new Date(list.data.window_end));
   }, [list.data]);
+
+  const windowDescription = useMemo(() => {
+    const days = list.data?.window_days ?? windowDays ?? 7;
+    if (days === 1) return "Ingredients for today";
+    return `Ingredients for the next ${days} days`;
+  }, [list.data?.window_days, windowDays]);
+
+  const selectedWindowLabel = useMemo(() => {
+    const match = GROCERY_WINDOW_OPTIONS.find((opt) => opt.value === windowDays);
+    return match?.label ?? "Planned";
+  }, [windowDays]);
 
   const showSkeleton = list.isPending;
 
@@ -228,10 +242,7 @@ export default function GroceryListScreen() {
       <View className="flex-row items-start justify-between gap-3">
         <View className="min-w-0 flex-1">
           <Text className="font-sans-bold text-xl">Grocery</Text>
-          <Text className="mt-1 text-sm text-muted-foreground">
-            Ingredients for the next 7 days
-            {windowLabel ? <Text className="text-sm text-faint"> · {windowLabel}</Text> : null}
-          </Text>
+          <Text className="mt-1 text-sm text-muted-foreground">{windowDescription}</Text>
         </View>
         <Button
           variant="outline"
@@ -251,6 +262,78 @@ export default function GroceryListScreen() {
           </Text>
         </Button>
       </View>
+
+      <View className="mt-2 flex-row">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showWindowPicker }}
+          accessibilityLabel="Change grocery date range"
+          onPress={() => {
+            tapHaptic();
+            setShowWindowPicker((v) => !v);
+          }}
+          className={
+            showWindowPicker
+              ? "flex-row items-center gap-1.5 rounded-lg border border-[rgba(34,197,94,0.45)] bg-card px-2.5 py-1 active:opacity-80"
+              : "flex-row items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 active:opacity-80"
+          }
+        >
+          <CalendarDays size={13} color={colors.faint} />
+          <Text
+            className={
+              showWindowPicker
+                ? "font-sans-semibold text-xs text-foreground"
+                : "font-sans-semibold text-xs text-muted-foreground"
+            }
+          >
+            {windowLabel || "Select dates"}
+          </Text>
+          <Text className="font-sans-semibold text-xs text-faint">· {selectedWindowLabel}</Text>
+          <ChevronDown
+            size={13}
+            color={colors.faint}
+            style={{ transform: [{ rotate: showWindowPicker ? "180deg" : "0deg" }] }}
+          />
+        </Pressable>
+      </View>
+
+      {showWindowPicker ? (
+        <View
+          accessibilityRole="radiogroup"
+          accessibilityLabel="Grocery window"
+          className="mt-2.5 flex-row items-center gap-1 rounded-xl border border-border bg-secondary/40 p-1"
+        >
+          {GROCERY_WINDOW_OPTIONS.map((opt) => {
+            const selected = windowDays === opt.value;
+            return (
+              <Pressable
+                key={opt.label}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  tapHaptic();
+                  setWindowDays(opt.value);
+                }}
+                className={
+                  selected
+                    ? "flex-1 rounded-lg bg-card px-2 py-1.5"
+                    : "flex-1 rounded-lg px-2 py-1.5"
+                }
+              >
+                <Text
+                  className={
+                    selected
+                      ? "text-center font-sans-semibold text-xs text-foreground"
+                      : "text-center font-sans-semibold text-xs text-muted-foreground"
+                  }
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       <View className="mt-4 flex-row gap-2">
         <Input

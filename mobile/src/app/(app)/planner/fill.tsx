@@ -2,13 +2,13 @@ import { getErrorMessage } from "@/api/errors";
 import { createPlan, fetchPlansBetween } from "@/api/planner";
 import { importRecipeFromUrl } from "@/api/recipes";
 import {
-  commitWizard,
-  commitWizardNights,
   createWizardSession,
   fetchWizardSession,
   rewindWizard,
   selectWizardIdeas,
   streamBuild,
+  streamCommitWizard,
+  streamCommitWizardNights,
   streamIdeate,
   updateWizardDays,
   updateWizardPrefs
@@ -89,7 +89,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const ASSIGN_DAY_COUNT = 14;
 
-type UiStep = "days" | "hub" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type UiStep = "days" | "hub" | "prefs" | "ideate" | "select" | "build" | "review" | "assign" | "saving";
 type FlowContext = "week-fill" | "single-night" | "standalone-recipe";
 type InputMode = "structured" | "simple";
 
@@ -166,6 +166,8 @@ export default function MealPlanWizardScreen() {
   const [assignDayKey, setAssignDayKey] = useState<string | null>(null);
   const [assignPlansByKey, setAssignPlansByKey] = useState<Record<string, string>>({});
   const [loadingAssignDays, setLoadingAssignDays] = useState(false);
+  const [lastAssignDayOption, setLastAssignDayOption] = useState<string | null>(null);
+  const [savingTargetCount, setSavingTargetCount] = useState<number>(0);
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<MealPlanWizardSession | null>(null);
@@ -316,7 +318,7 @@ export default function MealPlanWizardScreen() {
 
   const headerEyebrow = useMemo(() => {
     if (recipeMode) return "Create";
-    if (uiStep === "days" || uiStep === "hub") return "Meal plan";
+    if (uiStep === "days" || uiStep === "hub" || uiStep === "saving") return "Meal plan";
     if (flowContext === "single-night" && activeNightKey) return dayLabel(activeNightKey);
     return "Fill plan";
   }, [recipeMode, uiStep, flowContext, activeNightKey]);
@@ -342,8 +344,10 @@ export default function MealPlanWizardScreen() {
         return "Review your recipe";
       case "assign":
         return "Add to a night?";
+      case "saving":
+        return recipeMode ? "Saving your recipe" : "Saving your meal plan";
     }
-  }, [uiStep, isSingleNightFlow, inputMode]);
+  }, [uiStep, isSingleNightFlow, inputMode, recipeMode]);
 
   // ---- Hub actions ----
   const openNightMenu = (dayKey: string) => {
@@ -720,6 +724,11 @@ export default function MealPlanWizardScreen() {
     }
     abortRef.current?.abort();
     setRunning(false);
+    setBusy(false);
+    if (uiStep === "saving") {
+      setUiStep(recipeMode ? "assign" : "hub");
+      return;
+    }
     if (uiStep === "ideate" || uiStep === "select") {
       await rewindTo("prefs");
       return;
@@ -738,18 +747,41 @@ export default function MealPlanWizardScreen() {
       router.replace("/planner");
       return;
     }
+    setSavingTargetCount(items.length);
+    setLiveEvents([]);
     setBusy(true);
+    setRunning(true);
+    setUiStep("saving");
+    let sawError = false;
+    const controller = new AbortController();
     try {
-      await commitWizardNights(items);
+      abortRef.current?.abort();
+      abortRef.current = controller;
+      await streamCommitWizardNights(
+        items,
+        (event) => {
+          if (event.status === "done") return;
+          setLiveEvents((ev) => [...ev, event]);
+          if (event.status === "error") {
+            sawError = true;
+            setError(event.message);
+          }
+        },
+        controller.signal
+      );
+      if (sawError) return;
       const hadGenerated = items.some((i) => Boolean(i.built_recipe));
       syncAfterPlanMutation({ recipesChanged: hadGenerated });
       toast.success("Meal plan saved.");
       router.replace("/planner");
     } catch (e) {
-      const msg = "Could not save plan";
-      setError(getErrorMessage(e, msg));
-      toast.fromError(e, msg);
+      if (!controller.signal.aborted && (e as Error).name !== "AbortError") {
+        const msg = "Could not save plan";
+        setError(getErrorMessage(e, msg));
+        toast.fromError(e, msg);
+      }
     } finally {
+      setRunning(false);
       setBusy(false);
     }
   };
@@ -812,19 +844,50 @@ export default function MealPlanWizardScreen() {
   const commitStandaloneRecipe = async (opts?: { assignDay?: string | null }) => {
     const current = sessionRef.current;
     if (!current) return;
+    const dayKey = opts?.assignDay ?? null;
+    setLastAssignDayOption(dayKey);
+    setSavingTargetCount(1);
     setError("");
+    setLiveEvents([]);
     setBusy(true);
+    setRunning(true);
+    setUiStep("saving");
+    let sawError = false;
+    const controller = new AbortController();
     try {
-      await commitWizard(current.id, { plan: false });
+      abortRef.current?.abort();
+      abortRef.current = controller;
+      await streamCommitWizard(
+        current.id,
+        { plan: false },
+        (event) => {
+          if (event.status === "done") return;
+          setLiveEvents((ev) => [...ev, event]);
+          if (event.status === "error") {
+            sawError = true;
+            setError(event.message);
+          }
+        },
+        controller.signal
+      );
+      if (sawError) return;
       const refreshed = await fetchWizardSession(current.id);
       setSession(refreshed);
       sessionRef.current = refreshed;
       const built = refreshed.built_recipes[0];
       const recipeId = built?.created_recipe_id ?? built?.existing_recipe_id ?? null;
-      const dayKey = opts?.assignDay ?? null;
       if (dayKey && recipeId != null) {
         const date = parseDateKey(dayKey);
         if (date) {
+          setLiveEvents((ev) => [
+            ...ev,
+            {
+              stage: "commit",
+              status: "running",
+              message: `Scheduling for ${dayLabel(dayKey)}…`,
+              progress: 0.96
+            }
+          ]);
           await createPlan(recipeId, date);
           syncAfterPlanMutation({ recipesChanged: true });
           toast.success("Recipe saved and added to your plan.");
@@ -837,10 +900,13 @@ export default function MealPlanWizardScreen() {
       if (recipeId != null) router.replace(`/recipes/${recipeId}` as never);
       else router.replace("/recipes");
     } catch (e) {
-      const msg = "Could not save recipe";
-      setError(getErrorMessage(e, msg));
-      toast.fromError(e, msg);
+      if (!controller.signal.aborted && (e as Error).name !== "AbortError") {
+        const msg = "Could not save recipe";
+        setError(getErrorMessage(e, msg));
+        toast.fromError(e, msg);
+      }
     } finally {
+      setRunning(false);
       setBusy(false);
     }
   };
@@ -1323,38 +1389,68 @@ export default function MealPlanWizardScreen() {
           </View>
         ) : null}
 
-        {/* IDEATE / BUILD */}
-        {uiStep === "ideate" || uiStep === "build" ? (
+        {/* IDEATE / BUILD / SAVING */}
+        {uiStep === "ideate" || uiStep === "build" || uiStep === "saving" ? (
           <View className="mt-5 gap-4">
             <WizardProgressPanel
               events={liveEvents}
               running={running}
-              title={uiStep === "ideate" ? "Ideating dinners" : "Writing full recipes"}
+              title={
+                uiStep === "ideate"
+                  ? "Ideating dinners"
+                  : uiStep === "saving"
+                    ? recipeMode
+                      ? "Saving your recipe"
+                      : "Saving your meal plan"
+                    : "Writing full recipes"
+              }
               subtitle={
                 uiStep === "ideate"
                   ? isSingleNightFlow
                     ? "Generating 3 dinner options"
                     : `Aiming for ${session?.idea_target_count ?? activeGenerationDays.length + 5} options`
-                  : isSingleNightFlow
-                    ? "Writing your chosen recipe"
-                    : `Building ${selectCount} recipes from your picks`
+                  : uiStep === "saving"
+                    ? recipeMode
+                      ? `Saving “${recipeTitle}” and cover photo`
+                      : `Persisting ${savingTargetCount} planned night${savingTargetCount === 1 ? "" : "s"} to your calendar`
+                    : isSingleNightFlow
+                      ? "Writing your chosen recipe"
+                      : `Building ${selectCount} recipes from your picks`
               }
             />
             {!running && error ? (
               <View className="flex-row gap-2">
-                <Button variant="outline" className="flex-1" onPress={() => void rewindTo("prefs")}>
-                  Edit input
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onPress={() =>
+                    uiStep === "saving"
+                      ? setUiStep(recipeMode ? "assign" : "hub")
+                      : void rewindTo("prefs")
+                  }
+                >
+                  {uiStep === "saving" ? "Back" : "Edit input"}
                 </Button>
                 <Button
                   className="flex-1"
-                  onPress={() => (uiStep === "ideate" ? void runIdeate() : void runBuild())}
+                  onPress={() =>
+                    uiStep === "ideate"
+                      ? void runIdeate()
+                      : uiStep === "saving"
+                        ? recipeMode
+                          ? void commitStandaloneRecipe({ assignDay: lastAssignDayOption })
+                          : void saveHubPlan()
+                        : void runBuild()
+                  }
                 >
                   Retry
                 </Button>
               </View>
             ) : (
               <Text className="py-2 text-center text-sm text-muted-foreground">
-                Hang tight — the pipeline is moving…
+                {uiStep === "saving"
+                  ? "Saving recipes, cover photos, and calendar slots…"
+                  : "Hang tight — the pipeline is moving…"}
               </Text>
             )}
           </View>

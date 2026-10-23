@@ -67,6 +67,30 @@ export function commitWizardNights(
   return post<PlannedRecipeDetail[]>("/meal-plan-wizard/commit-plan/", { nights });
 }
 
+/** Streamed session commit — emits progress events while persisting recipes, covers, and plans. */
+export function streamCommitWizard(
+  sessionId: string,
+  opts: { plan?: boolean } | undefined,
+  onEvent: SseHandler<MealPlanWizardProgressEvent>,
+  signal?: AbortSignal
+): Promise<void> {
+  return postSse(
+    `/meal-plan-wizard/sessions/${sessionId}/commit-stream/`,
+    { plan: opts?.plan ?? true },
+    onEvent,
+    signal
+  );
+}
+
+/** Streamed hub plan commit — emits progress events while saving each night's recipe, cover, and plan. */
+export function streamCommitWizardNights(
+  nights: MealPlanWizardNightCommitItem[],
+  onEvent: SseHandler<MealPlanWizardProgressEvent>,
+  signal?: AbortSignal
+): Promise<void> {
+  return postSse("/meal-plan-wizard/commit-plan-stream/", { nights }, onEvent, signal);
+}
+
 /** Streamed ideation — emits progress events until the stream closes. */
 export function streamIdeate(
   sessionId: string,

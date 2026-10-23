@@ -68,7 +68,16 @@ const { prefs: savedPrefs, save: persistPrefs } = useMealPlanWizardPrefs();
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const ASSIGN_DAY_COUNT = 14;
 
-type UiStep = "days" | "hub" | "prefs" | "ideate" | "select" | "build" | "review" | "assign";
+type UiStep =
+  | "days"
+  | "hub"
+  | "prefs"
+  | "ideate"
+  | "select"
+  | "build"
+  | "review"
+  | "assign"
+  | "saving";
 type FlowContext = "week-fill" | "single-night" | "standalone-recipe";
 type InputMode = "structured" | "simple";
 
@@ -200,6 +209,8 @@ const importError = ref("");
 const assignDayKey = ref<string | null>(null);
 const assignPlansByKey = ref<Record<string, string>>({});
 const loadingAssignDays = ref(false);
+const lastAssignDayOption = ref<string | null>(null);
+const savingTargetCount = ref(0);
 
 // ---- Infinite scroll sentinel ----
 const sentinelRef = ref<HTMLElement | null>(null);
@@ -255,7 +266,8 @@ function dayFullLabel(key: string | null) {
 
 const headerEyebrow = computed(() => {
   if (recipeMode.value) return "Create";
-  if (uiStep.value === "days" || uiStep.value === "hub") return "Meal plan";
+  if (uiStep.value === "days" || uiStep.value === "hub" || uiStep.value === "saving")
+    return "Meal plan";
   if (flowContext.value === "single-night" && activeNightKey.value) {
     return dayLabel(activeNightKey.value);
   }
@@ -283,6 +295,8 @@ const headerTitle = computed(() => {
       return "Review your recipe";
     case "assign":
       return "Add to a night?";
+    case "saving":
+      return recipeMode.value ? "Saving your recipe" : "Saving your meal plan";
     default:
       return "Plan meals";
   }
@@ -782,6 +796,11 @@ async function goBack() {
   }
   abortController?.abort();
   running.value = false;
+  busy.value = false;
+  if (uiStep.value === "saving") {
+    uiStep.value = recipeMode.value ? "assign" : "hub";
+    return;
+  }
   if (uiStep.value === "ideate" || uiStep.value === "select") {
     await rewindTo("prefs");
     return;
@@ -809,17 +828,40 @@ async function saveHubPlan() {
     await router.push(paths.planner);
     return;
   }
+  savingTargetCount.value = nights.length;
+  liveEvents.value = [];
   busy.value = true;
+  running.value = true;
+  uiStep.value = "saving";
+  let sawError = false;
   try {
-    await post("/meal-plan-wizard/commit-plan/", { nights });
+    abortController?.abort();
+    abortController = new AbortController();
+    await postSse<MealPlanWizardProgressEvent>(
+      "/meal-plan-wizard/commit-plan-stream/",
+      { nights },
+      (event) => {
+        if (event.status === "done") return;
+        liveEvents.value = [...liveEvents.value, event];
+        if (event.status === "error") {
+          sawError = true;
+          error.value = event.message;
+        }
+      },
+      abortController.signal
+    );
+    if (sawError || error.value) return;
     const hadGenerated = nights.some((n) => Boolean(n.built_recipe));
     syncAfterPlanMutation({ recipesChanged: hadGenerated });
     toast.success("Meal plan saved.");
     await router.push(paths.planner);
   } catch (e) {
-    error.value = getErrorMessage(e, "Could not save plan");
-    toast.fromError(e, "Could not save plan");
+    if ((e as Error).name !== "AbortError") {
+      error.value = getErrorMessage(e, "Could not save plan");
+      toast.fromError(e, "Could not save plan");
+    }
   } finally {
+    running.value = false;
     busy.value = false;
   }
 }
@@ -917,17 +959,47 @@ async function openAssignStep() {
 
 async function commitStandaloneRecipe(opts?: { assignDay?: string | null }) {
   if (!session.value) return;
+  const dayKey = opts?.assignDay ?? null;
+  lastAssignDayOption.value = dayKey;
+  savingTargetCount.value = 1;
   error.value = "";
+  liveEvents.value = [];
   busy.value = true;
+  running.value = true;
+  uiStep.value = "saving";
+  let sawError = false;
   try {
-    await post(`/meal-plan-wizard/sessions/${session.value.id}/commit/`, { plan: false });
+    abortController?.abort();
+    abortController = new AbortController();
+    await postSse<MealPlanWizardProgressEvent>(
+      `/meal-plan-wizard/sessions/${session.value.id}/commit-stream/`,
+      { plan: false },
+      (event) => {
+        if (event.status === "done") return;
+        liveEvents.value = [...liveEvents.value, event];
+        if (event.status === "error") {
+          sawError = true;
+          error.value = event.message;
+        }
+      },
+      abortController.signal
+    );
+    if (sawError || error.value) return;
     await refreshSession();
     const built = session.value?.built_recipes[0];
     const recipeId = built?.created_recipe_id ?? built?.existing_recipe_id ?? null;
-    const dayKey = opts?.assignDay ?? null;
     if (dayKey && recipeId != null) {
       const date = parseDateKey(dayKey);
       if (date) {
+        liveEvents.value = [
+          ...liveEvents.value,
+          {
+            stage: "commit",
+            status: "running",
+            message: `Scheduling for ${dayLabel(dayKey)}…`,
+            progress: 0.96
+          }
+        ];
         await post("/planned-recipe/", {
           recipe_id: recipeId,
           planned_for: date.toISOString()
@@ -946,9 +1018,12 @@ async function commitStandaloneRecipe(opts?: { assignDay?: string | null }) {
       await router.push(paths.recipes);
     }
   } catch (e) {
-    error.value = getErrorMessage(e, "Could not save recipe");
-    toast.fromError(e, "Could not save recipe");
+    if ((e as Error).name !== "AbortError") {
+      error.value = getErrorMessage(e, "Could not save recipe");
+      toast.fromError(e, "Could not save recipe");
+    }
   } finally {
+    running.value = false;
     busy.value = false;
   }
 }
@@ -1381,29 +1456,67 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- IDEATE / BUILD progress -->
-    <section v-else-if="uiStep === 'ideate' || uiStep === 'build'" class="mt-5 space-y-4">
+    <!-- IDEATE / BUILD / SAVING progress -->
+    <section
+      v-else-if="uiStep === 'ideate' || uiStep === 'build' || uiStep === 'saving'"
+      class="mt-5 space-y-4"
+    >
       <WizardProgressPanel
         :events="liveEvents"
         :running="running"
-        :title="uiStep === 'ideate' ? 'Ideating dinners' : 'Writing full recipes'"
+        :title="
+          uiStep === 'ideate'
+            ? 'Ideating dinners'
+            : uiStep === 'saving'
+              ? recipeMode
+                ? 'Saving your recipe'
+                : 'Saving your meal plan'
+              : 'Writing full recipes'
+        "
         :subtitle="
           uiStep === 'ideate'
             ? isSingleNightFlow
               ? 'Generating 3 dinner options'
               : `Aiming for ${session?.idea_target_count ?? activeGenerationDays.length + 5} options`
-            : isSingleNightFlow
-              ? 'Writing your chosen recipe'
-              : `Building ${selectCount} recipes from your picks`
+            : uiStep === 'saving'
+              ? recipeMode
+                ? `Saving “${recipeTitle}” and cover photo`
+                : `Persisting ${savingTargetCount} planned night${savingTargetCount === 1 ? '' : 's'} to your calendar`
+              : isSingleNightFlow
+                ? 'Writing your chosen recipe'
+                : `Building ${selectCount} recipes from your picks`
         "
       />
       <div v-if="!running && error" class="grid grid-cols-2 gap-2">
-        <Button variant="outline" @click="rewindTo('prefs')">Edit input</Button>
-        <Button @click="uiStep === 'ideate' ? runIdeate() : runBuild()">Retry</Button>
+        <Button
+          variant="outline"
+          @click="
+            uiStep === 'saving' ? (uiStep = recipeMode ? 'assign' : 'hub') : rewindTo('prefs')
+          "
+        >
+          {{ uiStep === "saving" ? "Back" : "Edit input" }}
+        </Button>
+        <Button
+          @click="
+            uiStep === 'ideate'
+              ? runIdeate()
+              : uiStep === 'saving'
+                ? recipeMode
+                  ? commitStandaloneRecipe({ assignDay: lastAssignDayOption })
+                  : saveHubPlan()
+                : runBuild()
+          "
+        >
+          Retry
+        </Button>
       </div>
       <div v-else class="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
         <LoaderCircle class="size-4 animate-spin" />
-        Hang tight — the pipeline is moving…
+        {{
+          uiStep === "saving"
+            ? "Saving recipes, cover photos, and calendar slots…"
+            : "Hang tight — the pipeline is moving…"
+        }}
       </div>
     </section>
 

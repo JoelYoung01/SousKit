@@ -366,9 +366,33 @@ def should_auto_dismiss(latest_planned_for: datetime | None, today: date) -> boo
     return today > planned_day + timedelta(days=1)
 
 
-def window_bounds(now: datetime) -> tuple[datetime, datetime]:
-    """Return [start_of_today, end_of_day + 6 days] for the sliding 7-day window."""
+DEFAULT_WINDOW_DAYS = 7
+MAX_WINDOW_DAYS = 90
+
+
+def window_bounds(
+    now: datetime,
+    days: int | None = None,
+    furthest_planned_for: datetime | None = None,
+) -> tuple[datetime, datetime, int]:
+    """Return [start_of_today, end_of_window, window_days].
+
+    When ``days`` is omitted, smartly sizes the window to cover through the
+    furthest planned meal from today (minimum 1 day), falling back to
+    ``DEFAULT_WINDOW_DAYS`` when nothing is planned ahead.
+    """
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=6)
+    if days is not None:
+        resolved_days = max(1, min(int(days), MAX_WINDOW_DAYS))
+    elif furthest_planned_for is not None:
+        furthest_day = furthest_planned_for.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        delta_days = (furthest_day - start).days + 1
+        resolved_days = max(1, min(delta_days, MAX_WINDOW_DAYS))
+    else:
+        resolved_days = DEFAULT_WINDOW_DAYS
+
+    end = start + timedelta(days=resolved_days - 1)
     end = end.replace(hour=23, minute=59, second=59, microsecond=999999)
-    return start, end
+    return start, end, resolved_days
