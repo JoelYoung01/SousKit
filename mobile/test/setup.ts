@@ -16,3 +16,9 @@ jest.mock("react-native-keyboard-controller", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
   return require("react-native-keyboard-controller/jest");
 });
+
+// Official mock: AsyncStorage in-memory store for Jest.
+jest.mock("@react-native-async-storage/async-storage", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
+  return require("@react-native-async-storage/async-storage/jest/async-storage-mock");
+});

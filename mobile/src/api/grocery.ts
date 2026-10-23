@@ -4,16 +4,21 @@ import type {
   GroceryListResponse,
   GroceryManualItemCreate,
   GroceryManualItemUpdate,
-  GrocerySummaryResponse
+  GrocerySummaryResponse,
+  GroceryWindowChoice
 } from "@/types";
 import { del, get, post, put } from "./client";
 
-export function fetchGroceryList(): Promise<GroceryListResponse> {
-  return get<GroceryListResponse>("/grocery/");
+function groceryQuery(days?: GroceryWindowChoice): string {
+  return days != null ? `?days=${days}` : "";
 }
 
-export function fetchGrocerySummary(): Promise<GrocerySummaryResponse> {
-  return get<GrocerySummaryResponse>("/grocery/summary/");
+export function fetchGroceryList(days?: GroceryWindowChoice): Promise<GroceryListResponse> {
+  return get<GroceryListResponse>(`/grocery/${groceryQuery(days)}`);
+}
+
+export function fetchGrocerySummary(days?: GroceryWindowChoice): Promise<GrocerySummaryResponse> {
+  return get<GrocerySummaryResponse>(`/grocery/summary/${groceryQuery(days)}`);
 }
 
 export function setGroceryItemStatus(

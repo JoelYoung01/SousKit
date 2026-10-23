@@ -926,9 +926,7 @@ onUnmounted(() => {
           type="button"
           class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors"
           :class="
-            inputMode === 'simple'
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground'
+            inputMode === 'simple' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
           "
           @click="inputMode = 'simple'"
         >
@@ -985,7 +983,11 @@ onUnmounted(() => {
           @click="runFreeformBuild()"
         >
           <Sparkles class="size-3.5" />
-          {{ recipeMode ? "Generate recipe" : `Build ${selectedDays.length} dinner${selectedDays.length === 1 ? "" : "s"}` }}
+          {{
+            recipeMode
+              ? "Generate recipe"
+              : `Build ${selectedDays.length} dinner${selectedDays.length === 1 ? "" : "s"}`
+          }}
         </Button>
         <Button v-else class="gap-1.5" :disabled="busy" @click="runIdeate()">
           <Sparkles class="size-3.5" />
@@ -1012,7 +1014,15 @@ onUnmounted(() => {
       />
       <div v-if="!running && error" class="grid grid-cols-2 gap-2">
         <Button variant="outline" @click="rewindTo('prefs')">Edit input</Button>
-        <Button @click="uiStep === 'ideate' ? runIdeate() : inputMode === 'simple' ? runFreeformBuild() : runBuild()">
+        <Button
+          @click="
+            uiStep === 'ideate'
+              ? runIdeate()
+              : inputMode === 'simple'
+                ? runFreeformBuild()
+                : runBuild()
+          "
+        >
           Retry
         </Button>
       </div>

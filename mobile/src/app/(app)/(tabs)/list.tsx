@@ -10,6 +10,7 @@ import {
   useCreateManualGroceryItem,
   useDeleteManualGroceryItem,
   useGroceryList,
+  useGroceryWindow,
   useSetGroceryStatus,
   useUpdateManualGroceryItem
 } from "@/hooks/use-grocery";
@@ -19,7 +20,7 @@ import { getErrorMessage } from "@/api/errors";
 import { showGroceryItemContextMenu } from "@/lib/grocery-item-menu";
 import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
-import type { GroceryItem } from "@/types";
+import { GROCERY_WINDOW_OPTIONS, type GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
 import { EyeOff, Plus, ShoppingCart } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -40,6 +41,7 @@ export default function GroceryListScreen() {
   const [pendingHideKeys, setPendingHideKeys] = useState<Set<string>>(() => new Set());
   const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  const { windowDays, setWindowDays } = useGroceryWindow();
   const list = useGroceryList();
   const setStatus = useSetGroceryStatus();
   const createManual = useCreateManualGroceryItem();
@@ -73,6 +75,12 @@ export default function GroceryListScreen() {
     if (!list.data?.window_start || !list.data?.window_end) return "";
     return formatShortRange(new Date(list.data.window_start), new Date(list.data.window_end));
   }, [list.data]);
+
+  const windowDescription = useMemo(() => {
+    const days = list.data?.window_days ?? windowDays ?? 7;
+    if (days === 1) return "Ingredients for today";
+    return `Ingredients for the next ${days} days`;
+  }, [list.data?.window_days, windowDays]);
 
   const showSkeleton = list.isPending;
 
@@ -229,7 +237,7 @@ export default function GroceryListScreen() {
         <View className="min-w-0 flex-1">
           <Text className="font-sans-bold text-xl">Grocery</Text>
           <Text className="mt-1 text-sm text-muted-foreground">
-            Ingredients for the next 7 days
+            {windowDescription}
             {windowLabel ? <Text className="text-sm text-faint"> · {windowLabel}</Text> : null}
           </Text>
         </View>
@@ -250,6 +258,42 @@ export default function GroceryListScreen() {
             {showDismissed ? "Hide dismissed" : "Show dismissed"}
           </Text>
         </Button>
+      </View>
+
+      <View
+        accessibilityRole="radiogroup"
+        accessibilityLabel="Grocery window"
+        className="mt-3 flex-row items-center gap-1 rounded-xl border border-border bg-secondary/40 p-1"
+      >
+        {GROCERY_WINDOW_OPTIONS.map((opt) => {
+          const selected = windowDays === opt.value;
+          return (
+            <Pressable
+              key={opt.label}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              onPress={() => {
+                tapHaptic();
+                setWindowDays(opt.value);
+              }}
+              className={
+                selected
+                  ? "flex-1 rounded-lg bg-card px-2 py-1.5"
+                  : "flex-1 rounded-lg px-2 py-1.5"
+              }
+            >
+              <Text
+                className={
+                  selected
+                    ? "text-center font-sans-semibold text-xs text-foreground"
+                    : "text-center font-sans-semibold text-xs text-muted-foreground"
+                }
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
       <View className="mt-4 flex-row gap-2">

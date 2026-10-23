@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { paths } from "@/sitemap";
 import { useGroceryStore } from "@/stores/grocery";
-import type { GroceryItem } from "@/types";
+import { GROCERY_WINDOW_OPTIONS, type GroceryItem, type GroceryWindowChoice } from "@/types";
 import { Eye, EyeOff, Plus, ShoppingCart, Trash2 } from "@lucide/vue";
 import { computed, onActivated, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -61,6 +61,20 @@ const windowLabel = computed(() => {
   const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
   return `${start.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`;
 });
+
+const windowDescription = computed(() => {
+  const days = groceryStore.windowDays ?? groceryStore.configuredWindowDays ?? 7;
+  if (days === 1) return "Ingredients for today";
+  return `Ingredients for the next ${days} days`;
+});
+
+async function onSelectWindow(choice: GroceryWindowChoice) {
+  try {
+    await groceryStore.setWindowDays(choice);
+  } catch {
+    /* store sets error */
+  }
+}
 
 const showSkeleton = computed(
   () => groceryStore.loading && groceryStore.items.length === 0 && !groceryStore.error
@@ -161,7 +175,7 @@ onUnmounted(() => {
       <div class="min-w-0">
         <h1 class="text-xl font-bold">Grocery</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          Ingredients for the next 7 days
+          {{ windowDescription }}
           <span v-if="windowLabel" class="text-faint"> · {{ windowLabel }}</span>
         </p>
       </div>
@@ -177,6 +191,28 @@ onUnmounted(() => {
       </Button>
     </div>
 
+    <div
+      class="mt-3 flex items-center gap-1 rounded-xl border border-border bg-secondary/40 p-1"
+      role="group"
+      aria-label="Grocery window"
+    >
+      <button
+        v-for="opt in GROCERY_WINDOW_OPTIONS"
+        :key="opt.label"
+        type="button"
+        class="flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors"
+        :class="
+          groceryStore.configuredWindowDays === opt.value
+            ? 'bg-card text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        "
+        :aria-pressed="groceryStore.configuredWindowDays === opt.value"
+        @click="onSelectWindow(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+
     <form class="mt-4 flex gap-2" @submit.prevent="onAddItem">
       <Input
         v-model="newItemName"
@@ -185,7 +221,12 @@ onUnmounted(() => {
         autocomplete="off"
         :disabled="addingItem"
       />
-      <Button type="submit" size="icon" class="shrink-0" :disabled="!newItemName.trim() || addingItem">
+      <Button
+        type="submit"
+        size="icon"
+        class="shrink-0"
+        :disabled="!newItemName.trim() || addingItem"
+      >
         <Plus class="size-4" />
         <span class="sr-only">Add item</span>
       </Button>

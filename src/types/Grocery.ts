@@ -39,11 +39,24 @@ export interface GroceryManualItemUpdate {
 export interface GroceryListResponse {
   window_start: string;
   window_end: string;
+  window_days: number;
   items: GroceryItem[];
 }
 
 export interface GrocerySummaryResponse {
   window_start: string;
   window_end: string;
+  window_days: number;
   active_count: number;
 }
+
+/** null = smart auto window (adjusts to the furthest planned meal). */
+export type GroceryWindowChoice = number | null;
+
+export const GROCERY_WINDOW_OPTIONS: { value: GroceryWindowChoice; label: string }[] = [
+  { value: null, label: "Planned" },
+  { value: 3, label: "3d" },
+  { value: 7, label: "7d" },
+  { value: 14, label: "14d" },
+  { value: 30, label: "30d" }
+];
