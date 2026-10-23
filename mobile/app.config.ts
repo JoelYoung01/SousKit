@@ -73,6 +73,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         faceIDPermission: "Sous Kit uses Face ID to unlock the app.",
       },
     ],
+    [
+      "expo-calendar",
+      {
+        // Reminders-only export — skip calendar permission strings.
+        calendarPermission: false,
+        remindersPermission:
+          "Sous Kit adds grocery items to a Reminders list you choose.",
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
