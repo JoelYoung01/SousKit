@@ -49,13 +49,16 @@ describe("buildCommitNightsPayload", () => {
     const draftByDay: Record<string, DraftNightEntry> = {
       "2026-10-23": draftFromExistingRecipe({
         id: 42,
+        slug: "saved-pasta",
         name: "Saved Pasta",
         description: "Quick pasta",
         created_on: "2026-01-01T00:00:00Z",
+        updated_on: "2026-01-01T00:00:00Z",
         created_by_id: 1,
         household_id: 1,
         public: false,
-        prep_time: 20
+        prep_time: 20,
+        head_version_number: 1
       }),
       "2026-10-25": draftFromBuiltRecipe({
         idea_id: "idea-1",
@@ -69,12 +72,15 @@ describe("buildCommitNightsPayload", () => {
       // Deselected night kept in draftByDay (non-destructive back) should not be committed if unselected
       "2026-10-27": draftFromExistingRecipe({
         id: 99,
+        slug: "deselected-soup",
         name: "Deselected Soup",
         description: "",
         created_on: "2026-01-01T00:00:00Z",
+        updated_on: "2026-01-01T00:00:00Z",
         created_by_id: 1,
         household_id: 1,
-        public: false
+        public: false,
+        head_version_number: 1
       })
     };
 

@@ -5,9 +5,13 @@ import type {
   RecipeCard,
   RecipeCreate,
   RecipeCoverGenerateResponse,
-  RecipeDetail
+  RecipeDetail,
+  RecipeVersionDetail,
+  RecipeVersionDiff,
+  RecipeVersionSummary
 } from "@/types";
 import { normalizeCoverOption } from "@/lib/coverMedia";
+import { recipeReadPath } from "@/lib/recipePath";
 import { del, get, post, put } from "./client";
 
 export const RECIPE_PAGE_SIZE = 50;
@@ -25,7 +29,35 @@ export function searchRecipes(searchText: string): Promise<RecipeCard[]> {
 }
 
 export function fetchRecipe(recipeId: number | string): Promise<RecipeDetail> {
-  return get<RecipeDetail>(`/recipe/${recipeId}/`);
+  return get<RecipeDetail>(recipeReadPath(recipeId));
+}
+
+export function fetchRecipeVersions(recipeId: number): Promise<RecipeVersionSummary[]> {
+  return get<RecipeVersionSummary[]>(`/recipe/${recipeId}/versions/`);
+}
+
+export function fetchRecipeVersion(
+  recipeId: number,
+  versionNumber: number
+): Promise<RecipeVersionDetail> {
+  return get<RecipeVersionDetail>(`/recipe/${recipeId}/versions/${versionNumber}/`);
+}
+
+export function diffRecipeVersions(
+  recipeId: number,
+  fromVersion: number,
+  toVersion: number
+): Promise<RecipeVersionDiff> {
+  return get<RecipeVersionDiff>(
+    `/recipe/${recipeId}/versions/diff/?from=${fromVersion}&to=${toVersion}`
+  );
+}
+
+export function restoreRecipeVersion(
+  recipeId: number,
+  versionNumber: number
+): Promise<RecipeDetail> {
+  return post<RecipeDetail>(`/recipe/${recipeId}/versions/${versionNumber}/restore/`, {});
 }
 
 export function createRecipe(body: RecipeCreate): Promise<RecipeDetail> {

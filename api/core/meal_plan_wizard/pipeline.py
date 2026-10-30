@@ -28,7 +28,8 @@ from api.core.meal_plan_wizard.session_store import (
 )
 from api.core.recipe_search import refresh_recipes_embeddings
 from api.core.recipe_text import normalize_instruction_newlines
-from api.models import Ingredient, PlannedRecipe, Recipe, User
+from api.core.recipe_versions import create_recipe
+from api.models import PlannedRecipe, Recipe, User
 
 
 class MealPlanWizardPipeline:
@@ -827,40 +828,10 @@ class MealPlanWizardPipeline:
         for day, built in pairs:
             recipe_id = built.existing_recipe_id or built.created_recipe_id
             if recipe_id is None:
-                db_recipe = Recipe(
-                    created_by_id=user.id,
-                    household_id=household.id,
-                    created_on=datetime.now(UTC),
-                    name=built.title,
-                    description=built.description,
-                    instructions=built.instructions,
-                    notes=built.notes,
-                    public=False,
-                    prep_time=built.prep_time,
-                )
-                db.add(db_recipe)
-                db.commit()
-                db.refresh(db_recipe)
-                for ing in built.ingredients:
-                    db_ing = Ingredient(
-                        created_by_id=user.id,
-                        created_on=datetime.now(UTC),
-                        name=str(ing.get("name") or "ingredient"),
-                        amount=ing.get("amount"),
-                        units=ing.get("units"),
-                        details=ing.get("details"),
-                        recipe_id=db_recipe.id,
-                    )
-                    db.add(db_ing)
-                db.commit()
-
                 cover_id = self._maybe_attach_cover(db, user, built)
-                if cover_id is not None:
-                    db_recipe.cover_image_id = cover_id
-                    db.add(db_recipe)
-                    db.commit()
-                    db.refresh(db_recipe)
-
+                db_recipe = self._persist_generated_recipe(
+                    db, user, household, built, cover_id
+                )
                 created_recipes.append(db_recipe)
 
                 recipe_id = db_recipe.id
@@ -951,40 +922,10 @@ class MealPlanWizardPipeline:
                         recipe_id = existing_rec.id
 
                 if recipe_id is None:
-                    db_recipe = Recipe(
-                        created_by_id=user.id,
-                        household_id=household.id,
-                        created_on=datetime.now(UTC),
-                        name=built.title,
-                        description=built.description,
-                        instructions=built.instructions,
-                        notes=built.notes,
-                        public=False,
-                        prep_time=built.prep_time,
-                    )
-                    db.add(db_recipe)
-                    db.commit()
-                    db.refresh(db_recipe)
-                    for ing in built.ingredients:
-                        db_ing = Ingredient(
-                            created_by_id=user.id,
-                            created_on=datetime.now(UTC),
-                            name=str(ing.get("name") or "ingredient"),
-                            amount=ing.get("amount"),
-                            units=ing.get("units"),
-                            details=ing.get("details"),
-                            recipe_id=db_recipe.id,
-                        )
-                        db.add(db_ing)
-                    db.commit()
-
                     cover_id = self._maybe_attach_cover(db, user, built)
-                    if cover_id is not None:
-                        db_recipe.cover_image_id = cover_id
-                        db.add(db_recipe)
-                        db.commit()
-                        db.refresh(db_recipe)
-
+                    db_recipe = self._persist_generated_recipe(
+                        db, user, household, built, cover_id
+                    )
                     created_recipes.append(db_recipe)
                     recipe_id = db_recipe.id
             else:
@@ -1114,33 +1055,6 @@ class MealPlanWizardPipeline:
                 )
                 await asyncio.sleep(0.18)
 
-                db_recipe = Recipe(
-                    created_by_id=user.id,
-                    household_id=household.id,
-                    created_on=datetime.now(UTC),
-                    name=built.title,
-                    description=built.description,
-                    instructions=built.instructions,
-                    notes=built.notes,
-                    public=False,
-                    prep_time=built.prep_time,
-                )
-                db.add(db_recipe)
-                db.commit()
-                db.refresh(db_recipe)
-                for ing in built.ingredients:
-                    db_ing = Ingredient(
-                        created_by_id=user.id,
-                        created_on=datetime.now(UTC),
-                        name=str(ing.get("name") or "ingredient"),
-                        amount=ing.get("amount"),
-                        units=ing.get("units"),
-                        details=ing.get("details"),
-                        recipe_id=db_recipe.id,
-                    )
-                    db.add(db_ing)
-                db.commit()
-
                 yield self._log(
                     session,
                     "commit",
@@ -1154,11 +1068,9 @@ class MealPlanWizardPipeline:
                 cover_id = await asyncio.to_thread(
                     self._maybe_attach_cover, db, user, built
                 )
-                if cover_id is not None:
-                    db_recipe.cover_image_id = cover_id
-                    db.add(db_recipe)
-                    db.commit()
-                    db.refresh(db_recipe)
+                db_recipe = self._persist_generated_recipe(
+                    db, user, household, built, cover_id
+                )
 
                 created_recipes.append(db_recipe)
                 recipe_id = db_recipe.id
@@ -1335,33 +1247,6 @@ class MealPlanWizardPipeline:
                     )
                     await asyncio.sleep(0.18)
 
-                    db_recipe = Recipe(
-                        created_by_id=user.id,
-                        household_id=household.id,
-                        created_on=datetime.now(UTC),
-                        name=built.title,
-                        description=built.description,
-                        instructions=built.instructions,
-                        notes=built.notes,
-                        public=False,
-                        prep_time=built.prep_time,
-                    )
-                    db.add(db_recipe)
-                    db.commit()
-                    db.refresh(db_recipe)
-                    for ing in built.ingredients:
-                        db_ing = Ingredient(
-                            created_by_id=user.id,
-                            created_on=datetime.now(UTC),
-                            name=str(ing.get("name") or "ingredient"),
-                            amount=ing.get("amount"),
-                            units=ing.get("units"),
-                            details=ing.get("details"),
-                            recipe_id=db_recipe.id,
-                        )
-                        db.add(db_ing)
-                    db.commit()
-
                     yield ProgressEvent(
                         stage="commit",
                         status="running",
@@ -1379,11 +1264,9 @@ class MealPlanWizardPipeline:
                     cover_id = await asyncio.to_thread(
                         self._maybe_attach_cover, db, user, built
                     )
-                    if cover_id is not None:
-                        db_recipe.cover_image_id = cover_id
-                        db.add(db_recipe)
-                        db.commit()
-                        db.refresh(db_recipe)
+                    db_recipe = self._persist_generated_recipe(
+                        db, user, household, built, cover_id
+                    )
 
                     created_recipes.append(db_recipe)
                     recipe_id = db_recipe.id
@@ -1481,6 +1364,29 @@ class MealPlanWizardPipeline:
             source=str(raw_built.get("source") or "generated"),
             existing_recipe_id=raw_built.get("existing_recipe_id"),
             created_recipe_id=raw_built.get("created_recipe_id"),
+        )
+
+    def _persist_generated_recipe(
+        self,
+        db: SessionDep,
+        user: User,
+        household,
+        built: WizardBuiltRecipe,
+        cover_id: int | None,
+    ) -> Recipe:
+        """Save a generated recipe as version 1, including its cover when present."""
+        return create_recipe(
+            db,
+            user_id=user.id,
+            household_id=household.id,
+            public=False,
+            name=built.title,
+            description=built.description,
+            instructions=built.instructions,
+            notes=built.notes,
+            prep_time=built.prep_time,
+            cover_image_id=cover_id,
+            ingredients=built.ingredients,
         )
 
     def _maybe_attach_cover(
