@@ -160,7 +160,7 @@ watch(
       </div>
     </section>
 
-    <!-- Action cards: Meal Plan / Create / Import / Dynamic (Grocery or Find) -->
+    <!-- Action cards: Create Plan / Create / Import / Dynamic (Grocery or Find) -->
     <section class="grid grid-cols-2 gap-2 px-5 pt-4">
       <button
         type="button"
@@ -169,7 +169,7 @@ watch(
       >
         <CalendarDays class="size-[18px] shrink-0 text-[#22c55e]/55" :stroke-width="2" />
         <span class="mt-3">
-          <span class="block text-sm font-semibold">Meal Plan</span>
+          <span class="block text-sm font-semibold">Create Plan</span>
           <span class="mt-0.5 block text-[11.5px] text-faint">Plan your nights</span>
         </span>
       </button>

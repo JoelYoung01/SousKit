@@ -125,7 +125,7 @@ export default function HomeScreen() {
       <View className="flex-row flex-wrap justify-between gap-y-2 px-5 pt-4">
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Meal Plan"
+          accessibilityLabel="Create Plan"
           onPress={() => {
             tapHaptic();
             router.push("/planner/fill" as never);
@@ -134,7 +134,7 @@ export default function HomeScreen() {
         >
           <CalendarDays size={18} color="rgba(34,197,94,0.55)" strokeWidth={2} />
           <View className="mt-3 gap-0.5">
-            <Text className="font-sans-semibold text-sm">Meal Plan</Text>
+            <Text className="font-sans-semibold text-sm">Create Plan</Text>
             <Text className="text-[11.5px] text-faint">Plan your nights</Text>
           </View>
         </Pressable>
