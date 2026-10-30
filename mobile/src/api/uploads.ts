@@ -18,7 +18,7 @@ const NETWORK_MESSAGE = "Network error — check your connection and try again."
 
 function clearSessionOnUnauthorized(status: number, token: string | null) {
   if (status === 401 && token) {
-    void useSessionStore.getState().clear();
+    void useSessionStore.getState().clear({ reauth: true });
     queryClient.clear();
   }
 }

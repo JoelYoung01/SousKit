@@ -13,7 +13,7 @@ from api.core.household import (
     user_can_access_recipe,
     user_can_edit_plan,
 )
-from api.models import PlannedRecipe, Recipe
+from api.models import PlannedRecipe, Recipe, RecipeVersion
 from api.schemas import (
     PlannedRecipeCreate,
     PlannedRecipeDetail,
@@ -31,7 +31,9 @@ router = APIRouter(
 def _planned_recipe_options():
     return (
         selectinload(PlannedRecipe.created_by),
-        selectinload(PlannedRecipe.recipe).selectinload(Recipe.cover_image),
+        selectinload(PlannedRecipe.recipe)
+        .selectinload(Recipe.current_version)
+        .selectinload(RecipeVersion.cover_image),
     )
 
 

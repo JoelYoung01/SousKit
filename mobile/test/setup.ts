@@ -17,6 +17,15 @@ jest.mock("react-native-keyboard-controller", () => {
   return require("react-native-keyboard-controller/jest");
 });
 
+// Passkeys talk to a native module. Tests that exercise the ceremony mock
+// `@/lib/passkeys`; this keeps incidental imports from loading Expo native code.
+jest.mock("react-native-passkeys", () => ({
+  isSupported: () => false,
+  isAutoFillAvalilable: () => false,
+  create: jest.fn(),
+  get: jest.fn()
+}));
+
 // Official mock: AsyncStorage in-memory store for Jest.
 jest.mock("@react-native-async-storage/async-storage", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory

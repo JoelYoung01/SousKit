@@ -48,12 +48,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/recipes/RecipeImportView.vue")
       },
       {
-        path: "recipes/:recipeId(\\d+)",
+        path: "recipes/:recipeId([a-z0-9-]+)",
         name: "recipe-detail",
         component: () => import("@/views/recipes/RecipeDetailView.vue")
       },
       {
-        path: "recipes/:recipeId(\\d+)/edit",
+        path: "recipes/:recipeId([a-z0-9-]+)/edit",
         name: "recipe-edit",
         component: () => import("@/views/recipes/RecipeEditView.vue")
       },

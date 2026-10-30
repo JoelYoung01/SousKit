@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { mediaUrl } from "@/lib/media";
+import { recipeReadPath } from "@/lib/recipePath";
 import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
 import { paths } from "@/sitemap";
 import { syncAfterRecipeMutation } from "@/stores/sync";
@@ -191,7 +192,7 @@ async function getRecipeDetails() {
   if (creating.value) return;
   loading.value = true;
   try {
-    recipeDetail.value = await get(`/recipe/${route.params.recipeId}/`);
+    recipeDetail.value = await get(recipeReadPath(String(route.params.recipeId)));
     fillForms();
   } catch (er) {
     if ((er as ApiError).status === 404) {
@@ -210,16 +211,23 @@ async function saveChanges() {
   try {
     if (!form.prep_time && form.prep_time !== 0) form.prep_time = undefined;
 
-    let recipeId: number;
+    const payload = {
+      ...form,
+      ingredients: ingredientForms
+        .filter((ing) => ing.name)
+        .map((ing) => ({
+          name: ing.name,
+          amount: ing.amount ?? null,
+          units: ing.units || null,
+          details: ing.details || null
+        }))
+    };
     if (creating.value) {
-      const result = await post(`/recipe/`, form);
-      recipeId = result.id;
-    } else {
-      const result = await put(`/recipe/${route.params.recipeId}/`, form);
-      recipeId = result.id;
+      await post(`/recipe/`, payload);
+    } else if (recipeDetail.value) {
+      await put(`/recipe/${recipeDetail.value.id}/`, payload);
     }
 
-    await saveIngredients(recipeId);
     syncAfterRecipeMutation();
     toast.success(creating.value ? "Recipe created." : "Recipe saved.");
     router.push(returnUrl.value);
@@ -228,21 +236,6 @@ async function saveChanges() {
     toast.fromError(er, "Couldn’t save this recipe.");
   }
   saving.value = false;
-}
-
-async function saveIngredients(recipeId: number) {
-  const existingIngredients = recipeDetail.value?.ingredients ?? [];
-  const newIngredients = ingredientForms.filter((ingredient) => !ingredient.id);
-  const updateIngredients = ingredientForms.filter((ingredient) => ingredient.id);
-  const deleteIngredients = existingIngredients.filter(
-    (ingredient) => !ingredientForms.some((formIngredient) => formIngredient.id === ingredient.id)
-  );
-
-  await Promise.all([
-    ...newIngredients.map((ing) => post(`/ingredient/`, { ...ing, recipe_id: recipeId })),
-    ...updateIngredients.map((ing) => put(`/ingredient/${ing.id}/`, ing)),
-    ...deleteIngredients.map((ing) => del(`/ingredient/${ing.id}/`))
-  ]);
 }
 
 function fillForms() {

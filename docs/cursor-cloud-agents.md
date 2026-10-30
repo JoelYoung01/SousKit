@@ -39,6 +39,8 @@ Password auth and Google OAuth are both supported.
 - `POST /api/auth/login/` — email/password. If the account exists but is unverified, the API returns **403** with `detail.redirect_to` / `Location: /verify-email?email=...` so the SPA must follow the server-directed page (and may refresh the OTP).
 - `POST /api/auth/login-google/` — unchanged Google ID token exchange; Google users are treated as email-verified (and can link to an existing password account with the same email).
 - `POST /api/auth/login-apple/` — Sign in with Apple identity-token exchange (`identity_token`, optional `full_name`). Verified against Apple's JWKS with `APPLE_APP_BUNDLE_ID` as the audience; same create-or-link-by-email behavior as Google. Native iOS only — the button never renders in the Expo web preview, so it cannot be manually tested in this VM (unit tests + curl error paths only).
+- Sessions are idle-based: `SESSION_IDLE_DAYS` (30). `GET /api/auth/verify-session/` mints a new token with a fresh window and the client must store it. There is no sign-in prompt while that window is valid. iOS calls it on launch and whenever the app returns to the foreground.
+- Passkeys: `POST /api/auth/passkeys/register/options/` + `.../verify/` while signed in, and `POST /api/auth/passkeys/login/options/` + `.../verify/` for a discoverable Face ID sign-in after the idle window. `WEBAUTHN_RP_ID` (default `sous-kit.com`) must match the iOS `webcredentials:` associated domain. AASA includes `webcredentials.apps` when `APPLE_TEAM_ID` is set. `uv run python -m unittest api.tests.test_access_model` covers the idle slide and a software-authenticator passkey round trip. The Face ID sheet itself is iOS-only.
 
 OTP codes are HMAC-hashed at rest, expire after `EMAIL_OTP_EXPIRE_MINUTES` (default 15), and attempt-limited. Without SMTP env vars the backend logs the OTP; configure `SMTP_*` + `EMAILS_FROM_EMAIL` to send real mail.
 
@@ -63,6 +65,14 @@ The admin seed also receives `SUPERUSER_GID` when set.
 
 - Routes under `/api/meal-plan-wizard/`. Pipeline stages: create session → ideate (SSE) → select → build (SSE) → commit.
 - Without `OPENROUTER_API_KEY`, the backend uses a deterministic stub LLM (`api/core/llm/client.py`). Set the key to call OpenRouter (`api/core/llm/client.py` → `OpenRouterLlmClient`). Optional `OPENROUTER_MODEL` defaults to `inception/mercury-2`. Tool helpers for user-scoped recipe search live in `api/core/llm/tools.py`.
+
+## Recipe version history
+
+- A recipe row is identity and metadata: `id`, `slug`, owner, household, `public`, and `current_version_id`.
+- Cooked content (name, description, instructions, notes, prep time, cover, ingredients) lives on append-only `recipe_version` rows. Saving, AI edit, import, and restore each append a version and move the head forward. Identical content does not create a new row. Toggling `public` does not.
+- `GET /api/recipe/{id}/` and `GET /api/recipe/slug/{slug}/` return the head version flattened into the usual recipe payload (`head_version_number`, `updated_on`, `slug` included).
+- History: `GET /api/recipe/{id}/versions/`, `GET /api/recipe/{id}/versions/{n}/`, `GET /api/recipe/{id}/versions/diff/?from=&to=`, `POST /api/recipe/{id}/versions/{n}/restore/`.
+- Create/update accept an `ingredients` array so one save is one version. The `/ingredient/` routes still work and each call appends its own version.
 
 ## Recipe semantic search
 
@@ -93,7 +103,7 @@ The admin seed also receives `SUPERUSER_GID` when set.
 
 - Separate pnpm project: `cd mobile && pnpm install` (do not mix with the root web `package.json`). Uses pnpm 10 with `node-linker=hoisted` (`mobile/.npmrc`) for Metro compatibility.
 - Testing on Linux (no Mac/simulator in the VM): run the Expo **web preview** — `cd mobile && pnpm web` (Metro dev server on port 8081, opens the same app rendered via react-native-web). Point it at the local API with the backend running; the default dev API URL is `http://localhost:8000/api`. Sign in with the seeded password users below.
-- Native-only surfaces that the web preview cannot exercise: Sign in with Apple (`expo-apple-authentication`) and the Face ID / Touch ID app lock (`expo-local-authentication`; the Account → Security toggle hides itself when no biometric hardware is enrolled, which includes web). Cover these with the Jest suites and `expo prebuild` checks instead.
+- Native-only surfaces that the web preview cannot exercise: Sign in with Apple (`expo-apple-authentication`) and passkeys (`react-native-passkeys`; the Account passkey button and the login Face ID button hide on web). Cover these with the Jest suites, `uv run python -m unittest api.tests.test_access_model`, and `expo prebuild` checks instead. The account screen still explains the 30-day idle rule on web.
 - Checks: `pnpm lint`, `pnpm typecheck`, `pnpm test` (Jest; RNTL v14 `render`/`fireEvent` are async — `await` them). Bundling sanity: `pnpm exec expo export --platform web`; native config sanity: `pnpm exec expo prebuild --platform ios --no-install` (generates the gitignored `ios/`).
 - Real iOS builds require macOS and run in CI (`.github/workflows/MobileRelease.yaml`); do not attempt `pod install`/`xcodebuild` in the Linux VM.
 

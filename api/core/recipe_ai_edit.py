@@ -17,7 +17,7 @@ from api.core.logging import logger
 from api.core.recipe_import.llm_extract import _normalize_llm_recipe
 from api.core.recipe_import.parse_ingredient import parse_ingredient_line
 from api.core.recipe_text import normalize_instruction_newlines
-from api.models import Ingredient, Recipe
+from api.models import Recipe
 
 
 class RecipeAiEditError(Exception):
@@ -245,33 +245,19 @@ def apply_recipe_patch(
     user_id: int,
     session: Session,
 ) -> Recipe:
-    """Persist an LLM patch onto the recipe row and replace its ingredients."""
-    from datetime import UTC, datetime
+    """Append a new recipe version from an LLM patch. Prior versions stay put."""
+    from api.core.recipe_versions import CHANGE_AI_EDIT, append_version
 
-    recipe.name = patch["name"]
-    recipe.description = patch["description"]
-    recipe.instructions = patch["instructions"]
-    recipe.notes = patch.get("notes")
-    recipe.prep_time = patch.get("prep_time")
-    session.add(recipe)
-
-    for existing in list(recipe.ingredients or []):
-        session.delete(existing)
-    session.flush()
-
-    now = datetime.now(UTC)
-    for ing in patch.get("ingredients") or []:
-        session.add(
-            Ingredient(
-                created_by_id=user_id,
-                created_on=now,
-                name=str(ing.get("name") or "ingredient")[:200],
-                amount=ing.get("amount"),
-                units=(str(ing["units"])[:40] if ing.get("units") else None),
-                details=(str(ing["details"])[:200] if ing.get("details") else None),
-                recipe_id=recipe.id,
-            )
-        )
-    session.commit()
-    session.refresh(recipe)
-    return recipe
+    return append_version(
+        session,
+        recipe,
+        user_id=user_id,
+        name=patch["name"],
+        description=patch["description"],
+        instructions=patch["instructions"],
+        notes=patch.get("notes"),
+        prep_time=patch.get("prep_time"),
+        cover_image_id=recipe.cover_image_id,
+        ingredients=patch.get("ingredients") or [],
+        change_kind=CHANGE_AI_EDIT,
+    )

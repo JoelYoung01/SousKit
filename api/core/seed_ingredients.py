@@ -107,11 +107,17 @@ def ensure_sample_ingredients(session: Session) -> None:
         recipe = by_name.get(recipe_name)
         if recipe is None:
             continue
+        if recipe.current_version_id is None:
+            continue
         existing = session.exec(
-            select(Ingredient).where(Ingredient.recipe_id == recipe.id)
+            select(Ingredient).where(
+                Ingredient.recipe_version_id == recipe.current_version_id
+            )
         ).first()
         if existing is not None:
             continue
+        # Sample data fills version 1 in place when it was seeded empty.
+        # User edits append a new version instead of rewriting history.
         for row in rows:
             session.add(
                 Ingredient(
@@ -121,7 +127,7 @@ def ensure_sample_ingredients(session: Session) -> None:
                     amount=row["amount"],
                     units=row["units"],
                     details=None,
-                    recipe_id=recipe.id,
+                    recipe_version_id=recipe.current_version_id,
                 )
             )
             created += 1

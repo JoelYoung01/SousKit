@@ -38,7 +38,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     usesAppleSignIn: true,
     // Universal Links: https://<domain>/join/<token> opens the app when
     // installed; otherwise the web join page handles the invite.
-    associatedDomains: [`applinks:${associatedDomain}`],
+    // applinks: household invite universal links.
+    // webcredentials: passkeys (Face ID) for this domain. Must match the API
+    // WEBAUTHN_RP_ID and the AASA webcredentials.apps entry.
+    associatedDomains: [`applinks:${associatedDomain}`, `webcredentials:${associatedDomain}`],
     config: {
       usesNonExemptEncryption: false,
     },
@@ -67,12 +70,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     "expo-apple-authentication",
-    [
-      "expo-local-authentication",
-      {
-        faceIDPermission: "Sous Kit uses Face ID to unlock the app.",
-      },
-    ],
     [
       "expo-calendar",
       {

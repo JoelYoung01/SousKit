@@ -27,8 +27,16 @@ class Settings(BaseSettings):
     # Deployed git SHA (or "dev" locally). Used by /api/health/ for release checks.
     APP_VERSION: str = "dev"
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    # 60 minutes * 24 hours * 8 days = 8 days
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    # Idle window for a session. verify-session mints a fresh token with this
+    # full lifetime, so opening the app (or loading the site) resets the clock.
+    # 60 minutes * 24 hours * 30 days.
+    SESSION_IDLE_DAYS: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
+    # Passkeys (WebAuthn). RP ID must match the iOS associated domain
+    # (webcredentials:) and the host of the AASA file. Default: sous-kit.com.
+    WEBAUTHN_RP_ID: str = "sous-kit.com"
+    WEBAUTHN_RP_NAME: str = "Sous Kit"
+    WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
     HASH_ALGORITHM: str = "HS256"
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"

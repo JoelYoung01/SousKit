@@ -1,9 +1,10 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
 from api.core.config import settings
+from api.core.recipe_versions import create_recipe
 from api.core.security import hash_password
 from api.models import Recipe, User
 
@@ -239,9 +240,21 @@ def init_recipes(session: Session):
         },
     ]
 
-    recipes = [Recipe.model_validate(recipe_data) for recipe_data in recipes_source]
-    session.add_all(recipes)
-    session.commit()
+    for recipe_data in recipes_source:
+        create_recipe(
+            session,
+            user_id=user.id,
+            household_id=household.id,
+            public=bool(recipe_data["public"]),
+            name=recipe_data["name"],
+            description=recipe_data["description"],
+            instructions=recipe_data["instructions"],
+            notes=recipe_data["notes"],
+            prep_time=recipe_data["prep_time"],
+            cover_image_id=None,
+            ingredients=[],
+            created_on=datetime.now(UTC),
+        )
     logger.info("Successfully created recipes")
 
 

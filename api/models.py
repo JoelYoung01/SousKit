@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from api.core.timezone_handler import UTCDateTime
@@ -78,10 +78,36 @@ class TokenType(Enum):
 
 class Token(BaseIndexedDbModel, table=True):
     user_id: int = Field(foreign_key="user.id")
-    access_token: str
+    access_token: str = Field(unique=True, index=True)
     token_type: TokenType
 
     user: "User" = Relationship(back_populates="tokens")
+
+
+class Passkey(BaseIndexedDbModel, table=True):
+    """A WebAuthn credential (iOS passkey) that can mint a new session."""
+
+    user_id: int = Field(foreign_key="user.id", index=True)
+    credential_id: str = Field(unique=True, index=True)
+    public_key: str
+    sign_count: int = 0
+    transports: str | None = None
+    aaguid: str | None = None
+    created_on: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc), sa_type=UTCDateTime
+    )
+    last_used_on: datetime | None = Field(default=None, sa_type=UTCDateTime)
+
+    user: "User" = Relationship()
+
+
+class WebAuthnChallenge(BaseIndexedDbModel, table=True):
+    """Short-lived challenge for a passkey registration or sign-in ceremony."""
+
+    challenge: str = Field(unique=True, index=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    purpose: str
+    expires_at: datetime = Field(sa_type=UTCDateTime)
 
 
 class Permission(BaseIndexedDbModel, table=True):
@@ -98,31 +124,144 @@ class Upload(BaseIndexedDbModel, table=True):
 
 
 class Recipe(BaseIndexedDbModel, table=True):
+    """Stable recipe identity. Cooked content lives on ``RecipeVersion`` rows.
+
+    ``current_version_id`` points at the head of an append-only linear history.
+    Reads of name, ingredients, and the other content fields resolve that head.
+    """
+
+    slug: str = Field(max_length=180, unique=True, index=True)
     created_by_id: int = Field(foreign_key="user.id")
     household_id: int = Field(foreign_key="household.id", index=True)
     created_on: datetime = Field(sa_type=UTCDateTime)
-    name: str
-    description: str
-    instructions: str
-    notes: str | None
     public: bool = False
-    prep_time: float | None = None
-    cover_image_id: int | None = Field(foreign_key="upload.id", default=None)
+    # Integer pointer, not a DB foreign key, so a recipe row can be inserted
+    # before its first version exists. Application code always sets it.
+    current_version_id: int | None = Field(default=None, index=True)
     # JSON float array + model id for hybrid semantic search (not exposed in API DTOs).
     embedding_json: str | None = None
     embedding_model: str | None = Field(default=None, max_length=120)
 
     created_by: "User" = Relationship()
     household: "Household" = Relationship()
-    ingredients: list["Ingredient"] = Relationship(
+    versions: list["RecipeVersion"] = Relationship(
         back_populates="recipe",
         cascade_delete=True,
+        sa_relationship_kwargs={
+            "foreign_keys": "RecipeVersion.recipe_id",
+            "order_by": "RecipeVersion.version_number",
+            "overlaps": "current_version",
+        },
+    )
+    current_version: Optional["RecipeVersion"] = Relationship(
+        sa_relationship_kwargs={
+            "primaryjoin": "foreign(Recipe.current_version_id) == RecipeVersion.id",
+            "viewonly": True,
+            "uselist": False,
+            "overlaps": "versions",
+        },
     )
     planned: list["PlannedRecipe"] = Relationship(
         back_populates="recipe",
         cascade_delete=True,
     )
-    cover_image: "Upload" = Relationship()
+
+    @property
+    def _head(self) -> Optional["RecipeVersion"]:
+        return self.current_version
+
+    @property
+    def name(self) -> str:
+        head = self._head
+        return head.name if head is not None else ""
+
+    @property
+    def description(self) -> str:
+        head = self._head
+        return head.description if head is not None else ""
+
+    @property
+    def instructions(self) -> str:
+        head = self._head
+        return head.instructions if head is not None else ""
+
+    @property
+    def notes(self) -> str | None:
+        head = self._head
+        return head.notes if head is not None else None
+
+    @property
+    def prep_time(self) -> float | None:
+        head = self._head
+        return head.prep_time if head is not None else None
+
+    @property
+    def cover_image_id(self) -> int | None:
+        head = self._head
+        return head.cover_image_id if head is not None else None
+
+    @property
+    def cover_image(self) -> Optional["Upload"]:
+        head = self._head
+        return head.cover_image if head is not None else None
+
+    @property
+    def ingredients(self) -> list["Ingredient"]:
+        head = self._head
+        if head is None:
+            return []
+        return list(head.ingredients or [])
+
+    @property
+    def head_version_number(self) -> int:
+        head = self._head
+        return head.version_number if head is not None else 0
+
+    @property
+    def updated_on(self) -> datetime:
+        head = self._head
+        return head.created_on if head is not None else self.created_on
+
+
+class RecipeVersion(BaseIndexedDbModel, table=True):
+    """One saved snapshot in a recipe's append-only history."""
+
+    __tablename__ = "recipe_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "recipe_id",
+            "version_number",
+            name="uq_recipe_version_recipe_id_version_number",
+        ),
+    )
+
+    recipe_id: int = Field(foreign_key="recipe.id", index=True)
+    version_number: int
+    created_on: datetime = Field(sa_type=UTCDateTime)
+    created_by_id: int = Field(foreign_key="user.id")
+    name: str
+    description: str
+    instructions: str
+    notes: str | None = None
+    prep_time: float | None = None
+    cover_image_id: int | None = Field(default=None, foreign_key="upload.id")
+    # create | edit | ai_edit | import | restore
+    change_kind: str = Field(max_length=32)
+    restored_from_version: int | None = None
+
+    recipe: Recipe = Relationship(
+        back_populates="versions",
+        sa_relationship_kwargs={
+            "foreign_keys": "RecipeVersion.recipe_id",
+            "overlaps": "current_version",
+        },
+    )
+    created_by: "User" = Relationship()
+    cover_image: Optional["Upload"] = Relationship()
+    ingredients: list["Ingredient"] = Relationship(
+        back_populates="recipe_version",
+        cascade_delete=True,
+    )
 
 
 class Ingredient(BaseIndexedDbModel, table=True):
@@ -132,10 +271,17 @@ class Ingredient(BaseIndexedDbModel, table=True):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
-    recipe_id: int = Field(foreign_key="recipe.id")
+    recipe_version_id: int = Field(foreign_key="recipe_version.id", index=True)
 
-    recipe: "Recipe" = Relationship(back_populates="ingredients")
+    recipe_version: "RecipeVersion" = Relationship(back_populates="ingredients")
     created_by: "User" = Relationship()
+
+    @property
+    def recipe(self) -> Recipe | None:
+        version = self.recipe_version
+        if version is None:
+            return None
+        return version.recipe
 
 
 class PlannedRecipe(BaseIndexedDbModel, table=True):

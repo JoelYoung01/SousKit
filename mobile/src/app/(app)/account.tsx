@@ -1,5 +1,5 @@
 import { updateUser } from "@/api/users";
-import { AppLockToggle } from "@/components/AppLockToggle";
+import { PasskeySection } from "@/components/PasskeySection";
 import { HouseholdSection } from "@/components/HouseholdSection";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/ui/button";
@@ -135,7 +135,7 @@ export default function AccountScreen() {
 
           <HouseholdSection />
 
-          <AppLockToggle />
+          <PasskeySection />
 
           <Button variant="destructive" className="mt-6" onPress={() => void signOut()}>
             Sign out

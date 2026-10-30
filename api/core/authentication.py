@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from urllib.parse import urlencode
@@ -7,7 +8,7 @@ from urllib.parse import urlencode
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from api.core.config import settings
 from api.core.database import SessionDep
@@ -26,28 +27,94 @@ from api.models import EmailVerificationChallenge, Token, TokenType, User
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
-async def get_current_user(
-    session: SessionDep, token: Annotated[str, Depends(oauth2_scheme)]
-):
-    credentials_exception = HTTPException(
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Please sign in again to continue.",
+        detail=detail,
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+
+def token_expires_at(access_token: str) -> datetime | None:
+    """Read a token's exp without enforcing it. None when the token is junk."""
     try:
         payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.HASH_ALGORITHM]
+            access_token,
+            settings.SECRET_KEY,
+            algorithms=[settings.HASH_ALGORITHM],
+            options={"verify_exp": False},
         )
-        user_id: str | None = payload.get("user_id")
-        if user_id is None:
-            raise credentials_exception
     except jwt.InvalidTokenError:
-        raise credentials_exception
+        return None
+    exp = payload.get("exp")
+    if not isinstance(exp, int | float):
+        return None
+    return datetime.fromtimestamp(exp, tz=timezone.utc)
 
-    user = session.exec(select(User).where(User.id == user_id)).first()
+
+def get_db_token(session: Session, raw_token: str) -> Token:
+    """Accept a bearer token only when its signature, expiry, and DB row agree."""
+    try:
+        jwt.decode(raw_token, settings.SECRET_KEY, algorithms=[settings.HASH_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise _unauthorized("Your session has expired. Please sign in again.")
+    except jwt.InvalidTokenError:
+        raise _unauthorized("Your session is invalid. Please sign in again.")
+
+    db_token = session.exec(
+        select(Token).where(Token.access_token == raw_token)
+    ).first()
+    if db_token is None:
+        raise _unauthorized("Your session has expired. Please sign in again.")
+    return db_token
+
+
+# Keep the token the client just presented, plus a few newer ones, so an
+# in-flight request still works while the app stores the refreshed token.
+_MAX_LIVE_TOKENS_PER_USER = 8
+
+
+def _prune_user_tokens(session: Session, user_id: int, *, keep_ids: set[int]) -> None:
+    now = datetime.now(tz=timezone.utc)
+    rows = session.exec(select(Token).where(Token.user_id == user_id)).all()
+    live: list[tuple[datetime, Token]] = []
+    for row in rows:
+        expires = token_expires_at(row.access_token)
+        if expires is None or expires <= now:
+            session.delete(row)
+            continue
+        live.append((expires, row))
+    overflow = len(live) - _MAX_LIVE_TOKENS_PER_USER
+    for _, row in sorted(live, key=lambda item: item[0]):
+        if overflow <= 0:
+            break
+        if row.id in keep_ids:
+            continue
+        session.delete(row)
+        overflow -= 1
+
+
+def slide_session(current: Token, session: Session) -> Token:
+    """Mint a new idle window and keep the presented token valid for in-flight calls."""
+    user = session.get(User, current.user_id)
+    if user is None or user.disabled or not user.email_verified:
+        raise _unauthorized("Your session has expired. Please sign in again.")
+    previous_id = current.id
+    fresh = create_access_token_for_user(user, session, record_login=False)
+    keep = {previous_id, fresh.id}
+    _prune_user_tokens(session, user.id, keep_ids={pk for pk in keep if pk is not None})
+    session.commit()
+    session.refresh(fresh)
+    return fresh
+
+
+async def get_current_user(
+    session: SessionDep, token: Annotated[str, Depends(oauth2_scheme)]
+):
+    db_token = get_db_token(session, token)
+    user = session.get(User, db_token.user_id)
     if user is None:
-        raise credentials_exception
+        raise _unauthorized("Please sign in again to continue.")
     return user
 
 
@@ -323,11 +390,16 @@ def get_or_create_user_from_google_token(google_token, session: SessionDep):
     return db_user
 
 
-def create_access_token_for_user(user: User, session: SessionDep) -> Token:
+def create_access_token_for_user(
+    user: User, session: Session, *, record_login: bool = True
+) -> Token:
     access_token = jwt.encode(
         {
             "user_id": user.id,
             "email": user.email,
+            # Unique per mint. exp is whole seconds, so two refreshes in the
+            # same second would otherwise be the same string.
+            "jti": secrets.token_urlsafe(16),
             "exp": datetime.now(timezone.utc)
             + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         },
@@ -345,8 +417,9 @@ def create_access_token_for_user(user: User, session: SessionDep) -> Token:
 
     session.add(db_token)
 
-    user.last_login = datetime.now(timezone.utc)
-    session.add(user)
+    if record_login:
+        user.last_login = datetime.now(timezone.utc)
+        session.add(user)
 
     session.commit()
     session.refresh(db_token)
@@ -417,27 +490,7 @@ def create_access_token(google_token, session: SessionDep):
 def verify_access_token(
     access_token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
 ) -> Token:
-    try:
-        # Verify the session token
-        jwt.decode(
-            access_token, settings.SECRET_KEY, algorithms=[settings.HASH_ALGORITHM]
-        )
-        db_token = session.exec(
-            select(Token).where(Token.access_token == access_token)
-        ).first()
-        return db_token
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Your session has expired. Please sign in again.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Your session is invalid. Please sign in again.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return get_db_token(session, access_token)
 
 
 def verify_google_token(encoded_google_token: str):
