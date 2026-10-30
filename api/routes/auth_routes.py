@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from sqlmodel import select
 
 from api.core.authentication import (
+    CurrentUserDep,
     authenticate_password_user,
     can_resend_otp,
     create_access_token,
@@ -13,6 +14,7 @@ from api.core.authentication import (
     get_user_by_email,
     issue_email_otp,
     register_password_user,
+    slide_session,
     verify_access_token,
     verify_apple_token,
     verify_email_redirect_path,
@@ -21,11 +23,19 @@ from api.core.authentication import (
 )
 from api.core.config import settings
 from api.core.database import SessionDep
-from api.models import EmailVerificationChallenge, Token, User
+from api.core.passkeys import (
+    authentication_options,
+    registration_options,
+    verify_authentication,
+    verify_registration,
+)
+from api.models import EmailVerificationChallenge, Passkey, Token, User
 from api.schemas import (
     AppleLoginPayload,
     AuthRedirectResponse,
     GoogleLoginPayload,
+    PasskeyCeremonyPayload,
+    PasskeySummary,
     PasswordLoginPayload,
     RegisterPayload,
     ResendVerificationPayload,
@@ -185,8 +195,64 @@ def login_with_apple(payload: AppleLoginPayload, session: SessionDep):
 @router.get("/verify-session/", response_model=TokenResponse)
 def verify_session(
     access_token: Annotated[Token, Depends(verify_access_token)],
+    session: SessionDep,
 ):
-    return access_token
+    """Confirm the session and reset its 30-day idle window."""
+    return slide_session(access_token, session)
+
+
+@router.post("/passkeys/register/options/")
+def passkey_register_options(current_user: CurrentUserDep, session: SessionDep):
+    return registration_options(current_user, session)
+
+
+@router.post("/passkeys/register/verify/", response_model=PasskeySummary)
+def passkey_register_verify(
+    payload: PasskeyCeremonyPayload,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    row = verify_registration(current_user, payload.model_dump(), session)
+    return PasskeySummary(
+        id=row.id or 0, created_on=row.created_on, last_used_on=row.last_used_on
+    )
+
+
+@router.get("/passkeys/", response_model=list[PasskeySummary])
+def list_passkeys(current_user: CurrentUserDep, session: SessionDep):
+    rows = session.exec(select(Passkey).where(Passkey.user_id == current_user.id)).all()
+    return [
+        PasskeySummary(
+            id=row.id or 0, created_on=row.created_on, last_used_on=row.last_used_on
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/passkeys/{passkey_id}/", status_code=status.HTTP_204_NO_CONTENT)
+def delete_passkey(passkey_id: int, current_user: CurrentUserDep, session: SessionDep):
+    row = session.exec(
+        select(Passkey).where(
+            Passkey.id == passkey_id, Passkey.user_id == current_user.id
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="That passkey was not found."
+        )
+    session.delete(row)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/passkeys/login/options/")
+def passkey_login_options(session: SessionDep):
+    return authentication_options(session)
+
+
+@router.post("/passkeys/login/verify/", response_model=TokenResponse)
+def passkey_login_verify(payload: PasskeyCeremonyPayload, session: SessionDep):
+    return verify_authentication(payload.model_dump(), session)
 
 
 @router.get("/promote-superuser/", dependencies=[Depends(verify_access_token)])

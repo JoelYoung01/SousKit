@@ -90,6 +90,23 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class PasskeySummary(BaseModel):
+    id: int
+    created_on: datetime
+    last_used_on: datetime | None = None
+
+
+class PasskeyCeremonyPayload(BaseModel):
+    """Credential JSON returned by the platform authenticator."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    rawId: str
+    type: str = "public-key"
+    response: dict
+
+
 class UploadFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

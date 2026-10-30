@@ -78,10 +78,36 @@ class TokenType(Enum):
 
 class Token(BaseIndexedDbModel, table=True):
     user_id: int = Field(foreign_key="user.id")
-    access_token: str
+    access_token: str = Field(unique=True, index=True)
     token_type: TokenType
 
     user: "User" = Relationship(back_populates="tokens")
+
+
+class Passkey(BaseIndexedDbModel, table=True):
+    """A WebAuthn credential (iOS passkey) that can mint a new session."""
+
+    user_id: int = Field(foreign_key="user.id", index=True)
+    credential_id: str = Field(unique=True, index=True)
+    public_key: str
+    sign_count: int = 0
+    transports: str | None = None
+    aaguid: str | None = None
+    created_on: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc), sa_type=UTCDateTime
+    )
+    last_used_on: datetime | None = Field(default=None, sa_type=UTCDateTime)
+
+    user: "User" = Relationship()
+
+
+class WebAuthnChallenge(BaseIndexedDbModel, table=True):
+    """Short-lived challenge for a passkey registration or sign-in ceremony."""
+
+    challenge: str = Field(unique=True, index=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    purpose: str
+    expires_at: datetime = Field(sa_type=UTCDateTime)
 
 
 class Permission(BaseIndexedDbModel, table=True):

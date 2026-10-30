@@ -1,11 +1,9 @@
 import "../global.css";
 
-import { AppLockGate } from "@/components/AppLockGate";
 import { Toaster } from "@/components/Toaster";
 import { KeyboardProvider } from "@/components/ui/keyboard";
 import { colors } from "@/lib/colors";
 import { queryClient } from "@/lib/query-client";
-import { useAppLockStore } from "@/stores/app-lock";
 import { useSessionStore } from "@/stores/session";
 import {
   Figtree_400Regular,
@@ -33,24 +31,22 @@ export default function RootLayout() {
     Figtree_700Bold
   });
   const sessionStatus = useSessionStore((s) => s.status);
-  const appLockReady = useAppLockStore((s) => s.ready);
 
   useEffect(() => {
     void useSessionStore.getState().bootstrap();
-    void useAppLockStore.getState().bootstrap();
   }, []);
 
-  // Refetch stale queries when the app returns to the foreground.
+  // Refetch stale queries and reset the 30-day session idle window whenever
+  // the app is actually in use. This does not show a sign-in prompt.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status) => {
       if (Platform.OS !== "web") focusManager.setFocused(status === "active");
+      if (status === "active") void useSessionStore.getState().touch();
     });
     return () => sub.remove();
   }, []);
 
-  // Hold the splash screen until the lock preference is known so locked
-  // content never flashes before the gate mounts.
-  const ready = fontsLoaded && sessionStatus !== "loading" && appLockReady;
+  const ready = fontsLoaded && sessionStatus !== "loading";
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
@@ -70,7 +66,6 @@ export default function RootLayout() {
                 contentStyle: { backgroundColor: colors.background }
               }}
             />
-            <AppLockGate />
             <Toaster />
           </KeyboardProvider>
         </SafeAreaProvider>

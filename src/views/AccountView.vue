@@ -88,6 +88,14 @@ async function updateDisplayName() {
       </div>
     </div>
 
+    <div class="mt-4 rounded-xl border border-border bg-card p-4">
+      <p class="text-xs text-muted-foreground">Session</p>
+      <p class="mt-1 text-sm">
+        You stay signed in while you use Sous Kit. Opening the app resets a 30-day timer. On iPhone,
+        a passkey can sign you back in with Face ID after that.
+      </p>
+    </div>
+
     <HouseholdSection />
 
     <Button variant="destructive" class="mt-6 w-full" @click="logOut">Sign out</Button>

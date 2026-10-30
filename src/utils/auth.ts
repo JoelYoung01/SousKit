@@ -95,17 +95,26 @@ async function readAuthResponse(response: Response) {
   return data as Record<string, unknown> | null;
 }
 
-export async function checkSessionToken(access_token: string) {
+/**
+ * Verify a stored session. The server resets the 30-day idle window and
+ * returns a new token — callers must persist `access_token`.
+ * `null` means the session was rejected. `undefined` means a transient failure.
+ */
+export async function checkSessionToken(
+  access_token: string
+): Promise<TokenPayload | null | undefined> {
   try {
     const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/verify-session/`, {
       headers: {
         Authorization: `Bearer ${access_token}`
       }
     });
+    if (response.status === 401 || response.status === 403) return null;
     if (!response.ok) throw new Error("Recieved Non-200 response code while verifying session");
-    return await response.json();
+    return (await response.json()) as TokenPayload;
   } catch (er) {
     console.error(er);
+    return undefined;
   }
 }
 

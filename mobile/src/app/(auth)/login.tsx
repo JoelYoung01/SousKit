@@ -1,12 +1,13 @@
 import { AuthApiError, loginWithPassword } from "@/api/auth";
 import { AppleLoginButton } from "@/components/AppleLoginButton";
 import { GoogleLoginButton } from "@/components/GoogleLoginButton";
+import { PasskeyLoginButton } from "@/components/PasskeyLoginButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
-import { APP_NAME } from "@/config";
+import { APP_NAME, SESSION_IDLE_DAYS } from "@/config";
 import { colors } from "@/lib/colors";
 import { stashDevOtp } from "@/lib/dev-otp";
 import { useSessionStore } from "@/stores/session";
@@ -26,6 +27,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [oauthPending, setOauthPending] = useState(false);
+  const reauthWithPasskey = useSessionStore((s) => s.reauthWithPasskey);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const onSubmit = async () => {
@@ -62,6 +64,10 @@ export default function LoginScreen() {
             contentFit="contain"
           />
           <Text className="font-sans-bold text-3xl tracking-tight">{APP_NAME}</Text>
+          <Text className="max-w-[320px] text-center text-sm text-muted-foreground">
+            You stay signed in while you use {APP_NAME}. After {SESSION_IDLE_DAYS} days away, a
+            passkey signs you back in with Face ID.
+          </Text>
         </View>
 
         {oauthPending ? (
@@ -134,6 +140,11 @@ export default function LoginScreen() {
                 <Text className="text-xs text-faint">or</Text>
                 <View className="h-px flex-1 bg-border" />
               </View>
+              <PasskeyLoginButton
+                autoPrompt={reauthWithPasskey}
+                onPendingChange={setOauthPending}
+                onError={setErrorMessage}
+              />
               <AppleLoginButton onPendingChange={setOauthPending} onError={setErrorMessage} />
               <GoogleLoginButton onPendingChange={setOauthPending} onError={setErrorMessage} />
             </View>
