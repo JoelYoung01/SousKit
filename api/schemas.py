@@ -151,16 +151,19 @@ class RecipeCoverGenerateResponse(BaseModel):
 
 class RecipeSlim(BaseModel):
     id: int
+    slug: str
     name: str
     description: str
     instructions: str
     notes: str | None = None
     created_on: datetime
+    updated_on: datetime
     created_by_id: int
     household_id: int
     public: bool
     prep_time: float | None = None
     cover_image_id: int | None = None
+    head_version_number: int
 
     @field_validator("instructions")
     @classmethod
@@ -182,19 +185,31 @@ class RecipeCard(BaseModel):
     """List/card payload — omits instructions/notes for faster first paint."""
 
     id: int
+    slug: str
     name: str
     description: str
     created_on: datetime
+    updated_on: datetime
     created_by_id: int
     household_id: int
     public: bool
     prep_time: float | None = None
     cover_image_id: int | None = None
+    head_version_number: int
     cover_image: UploadFileResponse | None = None
 
 
 class CountResponse(BaseModel):
     count: int
+
+
+class IngredientWrite(BaseModel):
+    """Ingredient line stored on a recipe version. Ids are not reused."""
+
+    name: str
+    amount: float | None = None
+    units: str | None = None
+    details: str | None = None
 
 
 class RecipeCreate(BaseModel):
@@ -205,6 +220,7 @@ class RecipeCreate(BaseModel):
     public: bool
     prep_time: float | None = None
     cover_image_id: int | None = None
+    ingredients: list[IngredientWrite] = Field(default_factory=list)
 
     @field_validator("instructions")
     @classmethod
@@ -232,6 +248,8 @@ class RecipeUpdate(BaseModel):
     public: bool | None = None
     prep_time: float | None = None
     cover_image_id: int | None = None
+    # When set, replaces the head ingredient list on the new version.
+    ingredients: list[IngredientWrite] | None = None
 
     @field_validator("instructions")
     @classmethod
@@ -239,6 +257,68 @@ class RecipeUpdate(BaseModel):
         if value is None:
             return None
         return normalize_instruction_newlines(value)
+
+
+class RecipeVersionSummary(BaseModel):
+    version_number: int
+    created_on: datetime
+    created_by_id: int
+    created_by_display_name: str | None = None
+    change_kind: str
+    restored_from_version: int | None = None
+    name: str
+    is_current: bool
+
+
+class RecipeVersionDetail(RecipeVersionSummary):
+    description: str
+    instructions: str
+    notes: str | None = None
+    prep_time: float | None = None
+    cover_image_id: int | None = None
+    cover_image: UploadFileResponse | None = None
+    ingredients: list["IngredientSlim"]
+
+    @field_validator("instructions")
+    @classmethod
+    def _normalize_instructions(cls, value: str) -> str:
+        return normalize_instruction_newlines(value)
+
+
+class InstructionHunk(BaseModel):
+    op: str
+    before: str | None = None
+    after: str | None = None
+
+
+class RecipeFieldChange(BaseModel):
+    field: str
+    before: str | None = None
+    after: str | None = None
+    hunks: list[InstructionHunk] = Field(default_factory=list)
+
+
+class IngredientSnapshot(BaseModel):
+    name: str
+    amount: float | None = None
+    units: str | None = None
+    details: str | None = None
+
+
+class IngredientChange(BaseModel):
+    op: str
+    name: str
+    before: IngredientSnapshot | None = None
+    after: IngredientSnapshot | None = None
+
+
+class RecipeVersionDiff(BaseModel):
+    recipe_id: int
+    slug: str
+    from_version: int
+    to_version: int
+    fields: list[RecipeFieldChange]
+    ingredients: list[IngredientChange]
 
 
 class TimeFrameRequest(BaseModel):

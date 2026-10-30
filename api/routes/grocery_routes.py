@@ -22,6 +22,7 @@ from api.models import (
     GroceryManualItem,
     PlannedRecipe,
     Recipe,
+    RecipeVersion,
 )
 from api.schemas import (
     GroceryItem,
@@ -90,7 +91,11 @@ def _build_grocery_items(
             PlannedRecipe.planned_for >= start,
             PlannedRecipe.planned_for <= end,
         )
-        .options(selectinload(PlannedRecipe.recipe).selectinload(Recipe.ingredients))
+        .options(
+            selectinload(PlannedRecipe.recipe)
+            .selectinload(Recipe.current_version)
+            .selectinload(RecipeVersion.ingredients)
+        )
     ).all()
 
     manual_items = session.exec(

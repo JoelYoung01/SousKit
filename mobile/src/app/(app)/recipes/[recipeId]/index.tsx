@@ -1,6 +1,7 @@
-import { deleteRecipe } from "@/api/recipes";
+import { deleteRecipe, restoreRecipeVersion } from "@/api/recipes";
 import { EmptyState } from "@/components/EmptyState";
 import { RecipeAiEditSheet } from "@/components/RecipeAiEditSheet";
+import { RecipeHistorySheet } from "@/components/RecipeHistorySheet";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +22,7 @@ import { useHousehold } from "@/hooks/use-household";
 import { useRecipe } from "@/hooks/use-recipes";
 import { useSessionStore } from "@/stores/session";
 import { toast } from "@/stores/toast";
+import type { RecipeVersionDetail } from "@/types";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -47,6 +49,24 @@ export default function RecipeDetailScreen() {
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [aiEditOpen, setAiEditOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [preview, setPreview] = useState<RecipeVersionDetail | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const shown = recipe
+    ? preview
+      ? {
+          ...recipe,
+          name: preview.name,
+          description: preview.description,
+          instructions: preview.instructions,
+          notes: preview.notes ?? undefined,
+          prep_time: preview.prep_time ?? undefined,
+          cover_image: preview.cover_image ?? undefined,
+          ingredients: preview.ingredients
+        }
+      : recipe
+    : undefined;
 
   const scrollRef = useRef<ScrollView>(null);
   const ingredientsY = useRef(0);
@@ -60,7 +80,7 @@ export default function RecipeDetailScreen() {
     if (!recipe || copying) return;
     setCopying(true);
     try {
-      await Clipboard.setStringAsync(recipeToMarkdown(recipe));
+      await Clipboard.setStringAsync(recipeToMarkdown(shown ?? recipe));
       toast.success("Recipe copied to clipboard.");
     } catch (er) {
       toast.fromError(er, "Couldn’t copy this recipe.");
@@ -70,10 +90,10 @@ export default function RecipeDetailScreen() {
   };
 
   const onDelete = async () => {
-    if (!canEdit || deleting) return;
+    if (!recipe || !canEdit || deleting) return;
     setDeleting(true);
     try {
-      await deleteRecipe(recipeId!);
+      await deleteRecipe(recipe.id);
       setDeleteOpen(false);
       syncAfterRecipeMutation();
       toast.success("Recipe deleted.");
@@ -108,7 +128,7 @@ export default function RecipeDetailScreen() {
         <View className="h-56 overflow-hidden">
           {recipe ? (
             <Image
-              source={mediaSource(recipe.cover_image?.url)}
+              source={mediaSource(shown?.cover_image?.url)}
               style={{ width: "100%", height: "100%" }}
               contentFit="cover"
               transition={200}
@@ -137,7 +157,7 @@ export default function RecipeDetailScreen() {
             >
               <ArrowLeft size={16} color={colors.foreground} />
             </Pressable>
-            {canEdit ? (
+            {canEdit && !preview ? (
               <View className="flex-row items-center gap-2">
                 <Pressable
                   accessibilityRole="button"
@@ -171,9 +191,16 @@ export default function RecipeDetailScreen() {
           {recipe ? (
             <>
               <View className="flex-row items-start justify-between gap-3">
-                <Text className="flex-1 font-sans-bold text-xl leading-tight tracking-tight">
-                  {recipe.name}
-                </Text>
+                <View className="min-w-0 flex-1">
+                  <Text className="font-sans-bold text-xl leading-tight tracking-tight">
+                    {shown?.name}
+                  </Text>
+                  <Pressable onPress={() => setHistoryOpen(true)}>
+                    <Text className="mt-1 text-xs font-sans-semibold text-[#22c55e]">
+                      Version {preview?.version_number ?? recipe.head_version_number} · History
+                    </Text>
+                  </Pressable>
+                </View>
                 <Button
                   size="sm"
                   className="shrink-0"
@@ -189,22 +216,56 @@ export default function RecipeDetailScreen() {
                 <View className="flex-1 items-center rounded-xl bg-secondary/50 px-3 py-3">
                   <Text className="text-xs text-muted-foreground">Total time</Text>
                   <Text className="mt-1 font-sans-semibold text-sm">
-                    {formatPrepTime(recipe.prep_time) || "—"}
+                    {formatPrepTime(shown?.prep_time) || "—"}
                   </Text>
                 </View>
                 <View className="flex-1 items-center rounded-xl bg-secondary/50 px-3 py-3">
                   <Text className="text-xs text-muted-foreground">Ingredients</Text>
                   <Text className="mt-1 font-sans-semibold text-sm">
-                    {recipe.ingredients.length}
+                    {shown?.ingredients.length ?? 0}
                   </Text>
                 </View>
               </View>
 
-              {recipe.description ? (
+              {preview ? (
+                <View className="mt-3 rounded-xl bg-secondary px-3 py-2.5">
+                  <Text className="text-sm text-muted-foreground">
+                    Viewing version {preview.version_number} of {recipe.head_version_number}.
+                    Restoring saves it as a new version and keeps the rest of the history.
+                  </Text>
+                  <View className="mt-2 flex-row flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onPress={() => setPreview(null)}>
+                      Latest
+                    </Button>
+                    {canEdit ? (
+                      <Button
+                        size="sm"
+                        disabled={restoring}
+                        onPress={() => {
+                          if (!recipe || restoring) return;
+                          setRestoring(true);
+                          restoreRecipeVersion(recipe.id, preview.version_number)
+                            .then(() => {
+                              setPreview(null);
+                              syncAfterRecipeMutation();
+                              toast.success("Restored as a new version.");
+                            })
+                            .catch((er) => toast.fromError(er, "Couldn’t restore that version."))
+                            .finally(() => setRestoring(false));
+                        }}
+                      >
+                        {restoring ? "Restoring…" : "Restore this version"}
+                      </Button>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
+              {shown?.description ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">About</Text>
                   <Text className="text-base leading-6 text-muted-foreground">
-                    {recipe.description}
+                    {shown.description}
                   </Text>
                 </View>
               ) : null}
@@ -217,7 +278,7 @@ export default function RecipeDetailScreen() {
               >
                 <Text className="mb-2 font-sans-semibold text-sm">Ingredients</Text>
                 <View className="gap-1.5">
-                  {recipe.ingredients.map((ingredient) => {
+                  {(shown?.ingredients ?? []).map((ingredient) => {
                     const amountUnits = formatIngredientAmountUnits(
                       ingredient.amount,
                       ingredient.units
@@ -241,7 +302,7 @@ export default function RecipeDetailScreen() {
                       </View>
                     );
                   })}
-                  {recipe.ingredients.length === 0 ? (
+                  {(shown?.ingredients.length ?? 0) === 0 ? (
                     <Text className="text-sm text-muted-foreground">No ingredients listed.</Text>
                   ) : null}
                 </View>
@@ -250,7 +311,7 @@ export default function RecipeDetailScreen() {
               <View className="mt-5">
                 <Text className="mb-1 font-sans-semibold text-sm">Instructions</Text>
                 <View className="gap-2.5">
-                  {splitInstructionSteps(recipe.instructions).map((step, idx) => (
+                  {splitInstructionSteps(shown?.instructions ?? "").map((step, idx) => (
                     <Text key={`step-${idx}`} className="text-base leading-6 text-muted-foreground">
                       {step}
                     </Text>
@@ -258,10 +319,10 @@ export default function RecipeDetailScreen() {
                 </View>
               </View>
 
-              {recipe.notes ? (
+              {shown?.notes ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">Notes</Text>
-                  <Text className="text-base leading-6 text-muted-foreground">{recipe.notes}</Text>
+                  <Text className="text-base leading-6 text-muted-foreground">{shown.notes}</Text>
                 </View>
               ) : null}
 
@@ -307,11 +368,24 @@ export default function RecipeDetailScreen() {
         onCancel={() => setDeleteOpen(false)}
       />
 
-      {recipeId ? (
+      {recipe ? (
         <RecipeAiEditSheet
           visible={aiEditOpen}
-          recipeId={recipeId}
+          recipeId={recipe.id}
           onClose={() => setAiEditOpen(false)}
+          onApplied={() => setPreview(null)}
+        />
+      ) : null}
+      {recipe ? (
+        <RecipeHistorySheet
+          visible={historyOpen}
+          recipeId={recipe.id}
+          slug={recipe.slug}
+          headVersionNumber={recipe.head_version_number}
+          canRestore={canEdit}
+          onClose={() => setHistoryOpen(false)}
+          onPreview={setPreview}
+          onRestored={() => setPreview(null)}
         />
       ) : null}
     </View>

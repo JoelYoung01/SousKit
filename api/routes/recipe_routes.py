@@ -1,9 +1,7 @@
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, update
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func
 from sqlmodel import select
 
 from api.core.authentication import CurrentUserDep, verify_access_token
@@ -31,7 +29,23 @@ from api.core.recipe_search import (
     refresh_recipe_embedding_by_id,
     search_accessible_recipes,
 )
-from api.models import Ingredient, Recipe
+from api.core.recipe_versions import (
+    CHANGE_IMPORT,
+    RecipeVersionNotFound,
+    apply_recipe_update,
+)
+from api.core.recipe_versions import create_recipe as save_new_recipe
+from api.core.recipe_versions import (
+    diff_versions,
+    list_versions,
+    load_version,
+    recipe_card_load_options,
+    recipe_detail_load_options,
+    restore_version,
+    version_detail,
+    version_summary,
+)
+from api.models import Recipe
 from api.schemas import (
     CountResponse,
     RecipeAiEditRequest,
@@ -42,6 +56,9 @@ from api.schemas import (
     RecipeDetail,
     RecipeImportFromUrlRequest,
     RecipeUpdate,
+    RecipeVersionDetail,
+    RecipeVersionDiff,
+    RecipeVersionSummary,
 )
 
 router = APIRouter(
@@ -56,11 +73,27 @@ unauth_router = APIRouter(
 
 
 def _recipe_detail_options():
-    return (
-        selectinload(Recipe.cover_image),
-        selectinload(Recipe.created_by),
-        selectinload(Recipe.ingredients),
-    )
+    return recipe_detail_load_options()
+
+
+def _load_recipe(session: SessionDep, recipe_id: int) -> Recipe | None:
+    return session.exec(
+        select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
+    ).first()
+
+
+def _require_recipe(
+    session: SessionDep,
+    current_user,
+    recipe_id: int,
+) -> Recipe:
+    recipe = _load_recipe(session, recipe_id)
+    if not recipe or not user_can_access_recipe(session, current_user, recipe):
+        raise HTTPException(
+            status_code=404,
+            detail="That recipe couldn’t be found. It may have been deleted.",
+        )
+    return recipe
 
 
 @router.post("/import-from-url/", response_model=RecipeDetail)
@@ -80,36 +113,6 @@ async def import_recipe_from_url_route(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     household = ensure_user_household(session, current_user)
-    now = datetime.now(UTC)
-    db_recipe = Recipe(
-        created_by_id=current_user.id,
-        household_id=household.id,
-        created_on=now,
-        name=draft.name,
-        description=draft.description,
-        instructions=draft.instructions,
-        notes=draft.notes,
-        public=False,
-        prep_time=draft.prep_time,
-    )
-    session.add(db_recipe)
-    session.commit()
-    session.refresh(db_recipe)
-
-    for ing in draft.ingredients:
-        session.add(
-            Ingredient(
-                created_by_id=current_user.id,
-                created_on=now,
-                name=str(ing.get("name") or "ingredient")[:200],
-                amount=ing.get("amount"),
-                units=(str(ing["units"])[:40] if ing.get("units") else None),
-                details=(str(ing["details"])[:200] if ing.get("details") else None),
-                recipe_id=db_recipe.id,
-            )
-        )
-    session.commit()
-
     cover = generate_recipe_cover_upload(
         user=current_user,
         db=session,
@@ -117,24 +120,22 @@ async def import_recipe_from_url_route(
         description=draft.description,
         ingredients=draft.ingredients,
     )
-    if cover is not None:
-        db_recipe.cover_image_id = cover.id
-        session.add(db_recipe)
-        session.commit()
-
-    recipe = session.exec(
-        select(Recipe)
-        .where(Recipe.id == db_recipe.id)
-        .options(*_recipe_detail_options())
-    ).first()
-    if recipe is not None:
-        refresh_recipe_embedding(session, recipe, commit=True)
-        recipe = session.exec(
-            select(Recipe)
-            .where(Recipe.id == db_recipe.id)
-            .options(*_recipe_detail_options())
-        ).first()
-    return recipe
+    recipe = save_new_recipe(
+        session,
+        user_id=current_user.id,
+        household_id=household.id,
+        public=False,
+        name=draft.name,
+        description=draft.description,
+        instructions=draft.instructions,
+        notes=draft.notes,
+        prep_time=draft.prep_time,
+        cover_image_id=cover.id if cover is not None else None,
+        ingredients=draft.ingredients,
+        change_kind=CHANGE_IMPORT,
+    )
+    refresh_recipe_embedding(session, recipe, commit=True)
+    return _load_recipe(session, recipe.id)
 
 
 @router.post("/generate-cover/", response_model=RecipeCoverGenerateResponse)
@@ -231,7 +232,7 @@ def get_all_recipes(
     recipes = session.exec(
         select(Recipe)
         .where(recipe_access_filter(household.id))
-        .options(selectinload(Recipe.cover_image))
+        .options(*recipe_card_load_options())
         .offset(offset)
         .limit(limit)
     ).all()
@@ -250,7 +251,7 @@ def get_users_recipes(
     recipes = session.exec(
         select(Recipe)
         .where(Recipe.household_id == household.id)
-        .options(selectinload(Recipe.cover_image))
+        .options(*recipe_card_load_options())
         .order_by(Recipe.created_on.desc())
         .offset(offset)
         .limit(limit)
@@ -275,7 +276,7 @@ def get_users_recently_added_recipes(current_user: CurrentUserDep, session: Sess
     recipes = session.exec(
         select(Recipe)
         .where(Recipe.household_id == household.id)
-        .options(selectinload(Recipe.cover_image))
+        .options(*recipe_card_load_options())
         .order_by(Recipe.created_on.desc())
         .limit(5)
     ).all()
@@ -291,20 +292,113 @@ def get_recipe_by_id(
     current_user: CurrentUserDep,
     session: SessionDep,
 ):
+    """Current (head) version of a recipe, addressed by id."""
+    return _require_recipe(session, current_user, recipe_id)
+
+
+@router.get("/slug/{slug}/", response_model=RecipeDetail)
+def get_recipe_by_slug(
+    slug: str,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    """Current (head) version of a recipe, addressed by its stable slug."""
     recipe = session.exec(
-        select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
+        select(Recipe).where(Recipe.slug == slug).options(*_recipe_detail_options())
     ).first()
-    if not recipe:
-        raise HTTPException(
-            status_code=404,
-            detail="That recipe couldn’t be found. It may have been deleted.",
-        )
-    if not user_can_access_recipe(session, current_user, recipe):
+    if not recipe or not user_can_access_recipe(session, current_user, recipe):
         raise HTTPException(
             status_code=404,
             detail="That recipe couldn’t be found. It may have been deleted.",
         )
     return recipe
+
+
+@router.get("/{recipe_id:int}/versions/", response_model=list[RecipeVersionSummary])
+def get_recipe_versions(
+    recipe_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    """Append-only history, newest first. Does not change the head version."""
+    recipe = _require_recipe(session, current_user, recipe_id)
+    return [
+        version_summary(version, is_current=version.id == recipe.current_version_id)
+        for version in list_versions(session, recipe.id)
+    ]
+
+
+@router.get(
+    "/{recipe_id:int}/versions/diff/",
+    response_model=RecipeVersionDiff,
+)
+def get_recipe_version_diff(
+    recipe_id: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+    from_version: Annotated[int, Query(alias="from", ge=1)],
+    to_version: Annotated[int, Query(alias="to", ge=1)],
+):
+    """On-the-fly diff between two saved versions. Nothing is persisted."""
+    recipe = _require_recipe(session, current_user, recipe_id)
+    before = load_version(session, recipe.id, from_version)
+    after = load_version(session, recipe.id, to_version)
+    if before is None or after is None:
+        raise HTTPException(
+            status_code=404,
+            detail="That version couldn’t be found on this recipe.",
+        )
+    return diff_versions(recipe, before, after)
+
+
+@router.get(
+    "/{recipe_id:int}/versions/{version_number}/",
+    response_model=RecipeVersionDetail,
+)
+def get_recipe_version(
+    recipe_id: int,
+    version_number: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    recipe = _require_recipe(session, current_user, recipe_id)
+    version = load_version(session, recipe.id, version_number)
+    if version is None:
+        raise HTTPException(
+            status_code=404,
+            detail="That version couldn’t be found on this recipe.",
+        )
+    return version_detail(version, is_current=version.id == recipe.current_version_id)
+
+
+@router.post(
+    "/{recipe_id:int}/versions/{version_number}/restore/",
+    response_model=RecipeDetail,
+)
+def restore_recipe_version(
+    recipe_id: int,
+    version_number: int,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+):
+    """Append a new head that copies an older version. History is kept."""
+    recipe = _require_recipe(session, current_user, recipe_id)
+    if not user_can_edit_recipe(session, current_user, recipe):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit recipes in your household.",
+        )
+    try:
+        restored = restore_version(
+            session,
+            recipe,
+            user_id=current_user.id,
+            version_number=version_number,
+        )
+    except RecipeVersionNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    refresh_recipe_embedding(session, restored, commit=True)
+    return _load_recipe(session, recipe_id)
 
 
 @router.get("/search/", response_model=list[RecipeCard])
@@ -335,18 +429,23 @@ def create_recipe(
     recipe: RecipeCreate, currentUser: CurrentUserDep, session: SessionDep
 ):
     household = ensure_user_household(session, currentUser)
-    rec_dict = recipe.model_dump()
-    rec_dict["created_on"] = datetime.now(UTC)
-    rec_dict["created_by_id"] = currentUser.id
-    rec_dict["household_id"] = household.id
-
-    db_recipe = Recipe.model_validate(rec_dict)
-    session.add(db_recipe)
-    session.commit()
-    session.refresh(db_recipe)
+    payload = recipe.model_dump()
+    ingredients = payload.pop("ingredients")
+    db_recipe = save_new_recipe(
+        session,
+        user_id=currentUser.id,
+        household_id=household.id,
+        public=payload["public"],
+        name=payload["name"],
+        description=payload["description"],
+        instructions=payload["instructions"],
+        notes=payload.get("notes"),
+        prep_time=payload.get("prep_time"),
+        cover_image_id=payload.get("cover_image_id"),
+        ingredients=ingredients,
+    )
     refresh_recipe_embedding(session, db_recipe, commit=True)
-    session.refresh(db_recipe)
-    return db_recipe
+    return _load_recipe(session, db_recipe.id)
 
 
 @router.put(
@@ -380,33 +479,24 @@ def update_recipe(
             detail="No recipe fields were provided to update.",
         )
 
-    update_stmt = (
-        update(Recipe)
-        .where(Recipe.id == recipe_id)
-        .values(**values)
-        .execution_options(synchronize_session="fetch")
+    updated = apply_recipe_update(
+        session,
+        existing_recipe,
+        user_id=currentUser.id,
+        patch=values,
     )
-    session.exec(update_stmt)
-    session.commit()
-
-    updated = session.exec(
-        select(Recipe).where(Recipe.id == recipe_id).options(*_recipe_detail_options())
-    ).first()
-    if updated is not None:
-        content_keys = {
-            "name",
-            "description",
-            "instructions",
-            "notes",
-            "prep_time",
-        }
-        if content_keys.intersection(values):
-            refresh_recipe_embedding(session, updated, commit=True)
-            updated = session.exec(
-                select(Recipe)
-                .where(Recipe.id == recipe_id)
-                .options(*_recipe_detail_options())
-            ).first()
+    content_keys = {
+        "name",
+        "description",
+        "instructions",
+        "notes",
+        "prep_time",
+        "cover_image_id",
+        "ingredients",
+    }
+    if content_keys.intersection(values):
+        refresh_recipe_embedding(session, updated, commit=True)
+        updated = _load_recipe(session, recipe_id)
     return updated
 
 
@@ -421,15 +511,7 @@ async def ai_edit_recipe(
     session: SessionDep,
 ):
     """Apply a free-text edit instruction via the configured LLM and save."""
-    existing_recipe = session.exec(
-        select(Recipe)
-        .where(Recipe.id == recipe_id)
-        .options(
-            selectinload(Recipe.ingredients),
-            selectinload(Recipe.cover_image),
-            selectinload(Recipe.created_by),
-        )
-    ).first()
+    existing_recipe = _load_recipe(session, recipe_id)
 
     if not existing_recipe:
         raise HTTPException(
@@ -459,16 +541,7 @@ async def ai_edit_recipe(
     )
     refresh_recipe_embedding_by_id(session, recipe_id)
 
-    recipe = session.exec(
-        select(Recipe)
-        .where(Recipe.id == recipe_id)
-        .options(
-            selectinload(Recipe.cover_image),
-            selectinload(Recipe.created_by),
-            selectinload(Recipe.ingredients),
-        )
-    ).first()
-    return recipe
+    return _load_recipe(session, recipe_id)
 
 
 @router.delete("/{recipe_id:int}/", status_code=status.HTTP_204_NO_CONTENT)

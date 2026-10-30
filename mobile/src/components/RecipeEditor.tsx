@@ -1,12 +1,4 @@
-import {
-  createIngredient,
-  createRecipe,
-  deleteIngredient,
-  fetchRecipe,
-  generateRecipeCover,
-  updateIngredient,
-  updateRecipe
-} from "@/api/recipes";
+import { createRecipe, fetchRecipe, generateRecipeCover, updateRecipe } from "@/api/recipes";
 import { uploadImage, type PickedImage } from "@/api/uploads";
 import { getErrorMessage } from "@/api/errors";
 import { del } from "@/api/client";
@@ -351,35 +343,6 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
     setIngredients((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
-  const saveIngredients = async (savedRecipeId: number) => {
-    const existing = detail?.ingredients ?? [];
-    const toCreate = ingredients.filter((i) => !i.id);
-    const toUpdate = ingredients.filter((i) => i.id);
-    const toDelete = existing.filter((i) => !ingredients.some((row) => row.id === i.id));
-
-    await Promise.all([
-      ...toCreate.map((i) =>
-        createIngredient({
-          name: i.name.trim(),
-          amount: parseAmount(i.amount),
-          units: i.units.trim() || null,
-          details: i.details.trim() || null,
-          recipe_id: savedRecipeId
-        })
-      ),
-      ...toUpdate.map((i) =>
-        updateIngredient(i.id!, {
-          name: i.name.trim(),
-          amount: parseAmount(i.amount),
-          units: i.units.trim() || null,
-          details: i.details.trim() || null,
-          recipe_id: savedRecipeId
-        })
-      ),
-      ...toDelete.map((i) => deleteIngredient(i.id))
-    ]);
-  };
-
   const goBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace(creating ? "/home" : (`/recipes/${recipeId}` as never));
@@ -396,10 +359,18 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
         notes: notes.trim() || null,
         public: isPublic,
         prep_time: prepTime.trim() ? Number(prepTime) : null,
-        cover_image_id: coverImageId
+        cover_image_id: coverImageId,
+        ingredients: ingredients
+          .filter((i) => i.name.trim())
+          .map((i) => ({
+            name: i.name.trim(),
+            amount: parseAmount(i.amount),
+            units: i.units.trim() || null,
+            details: i.details.trim() || null
+          }))
       };
-      const saved = creating ? await createRecipe(body) : await updateRecipe(recipeId!, body);
-      await saveIngredients(saved.id);
+      if (creating) await createRecipe(body);
+      else if (detail) await updateRecipe(detail.id, body);
       syncAfterRecipeMutation();
       toast.success(creating ? "Recipe created." : "Recipe saved.");
       goBack();

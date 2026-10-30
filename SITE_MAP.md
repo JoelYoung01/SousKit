@@ -48,8 +48,8 @@ Opened by the raised **+** control. Items:
 |------|------|------|------|-------|
 | `/recipes/new` | `recipe-new` | `views/recipes/RecipeEditView.vue` | Required | Create |
 | `/recipes/import` | `recipe-import` | `views/recipes/RecipeImportView.vue` | Required | Link import live; photo still stub |
-| `/recipes/:recipeId` | `recipe-detail` | `views/recipes/RecipeDetailView.vue` | Required | `:recipeId` = `\d+` |
-| `/recipes/:recipeId/edit` | `recipe-edit` | `views/recipes/RecipeEditView.vue` | Required | Edit owned recipe |
+| `/recipes/:recipeId` | `recipe-detail` | `views/recipes/RecipeDetailView.vue` | Required | `:recipeId` is a numeric id or stable slug. The page loads the latest version; History can view, diff, and restore older ones |
+| `/recipes/:recipeId/edit` | `recipe-edit` | `views/recipes/RecipeEditView.vue` | Required | Edit owned recipe. One save appends a single version, including ingredients |
 
 ## Social / misc
 
@@ -75,7 +75,7 @@ Preserve bookmarks from the Vuetify app:
 
 ## Feature coverage (no new product scope)
 
-- **Recipe storage** — list, hybrid semantic/keyword search, detail, create/edit, delete, cover image, public flag
+- **Recipe storage** — list, hybrid semantic/keyword search, detail, create/edit, delete, cover image, public flag. Each recipe is one id + slug; saves append a linear version history (ingredients, instructions, description, and the rest of the cooked content). The default read is the latest version. Restore appends a copy of an older version instead of rewriting history
 - **Meal planning** — plan/unplan by day; home week strip + tonight hero; fill-gaps wizard (goals / diet / ingredients → idea shortlist → recipe build → plan commit; OpenRouter when `OPENROUTER_API_KEY` is set, else stub LLM)
 - **Create recipe** — home Create card → `/planner/fill?mode=recipe` (single-recipe LLM flow); optional day assign after review; skip keeps the recipe unplanned
 - **Import recipe** — paste a recipe website URL (`POST /recipe/import-from-url/`); schema.org scrape first, OpenRouter LLM fallback when configured; photo scan still stubbed; social video links out of scope for v1

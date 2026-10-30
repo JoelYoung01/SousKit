@@ -13,7 +13,7 @@ from sqlmodel import Session, and_, col, or_, select
 
 from api.core.embeddings.client import EmbeddingClient, get_embedding_client
 from api.core.household import get_membership, recipe_access_filter
-from api.models import Ingredient, Recipe, User
+from api.models import Ingredient, Recipe, RecipeVersion, User
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +91,8 @@ def refresh_recipe_embedding(
 ) -> None:
     """Compute and persist an embedding for ``recipe`` (soft-fails)."""
     embedder = client or get_embedding_client()
-    # Ensure ingredients are available for the document blob.
-    if recipe.ingredients is None:
-        session.refresh(recipe, attribute_names=["ingredients"])
+    # Head content (including ingredients) is what search should index.
+    _ = recipe.ingredients
     try:
         vector = embedder.embed_one(recipe_embedding_text(recipe))
     except Exception:
@@ -118,8 +117,7 @@ def refresh_recipes_embeddings(
         return
     embedder = client or get_embedding_client()
     for recipe in recipes:
-        if recipe.ingredients is None:
-            session.refresh(recipe, attribute_names=["ingredients"])
+        _ = recipe.ingredients
     texts = [recipe_embedding_text(r) for r in recipes]
     try:
         vectors = embedder.embed(texts)
@@ -144,7 +142,9 @@ def refresh_recipe_embedding_by_id(
     recipe = session.exec(
         select(Recipe)
         .where(Recipe.id == recipe_id)
-        .options(selectinload(Recipe.ingredients))
+        .options(
+            selectinload(Recipe.current_version).selectinload(RecipeVersion.ingredients)
+        )
     ).first()
     if not recipe:
         return
@@ -184,13 +184,17 @@ def _query_tokens(search_text: str) -> list[str]:
     return _TOKEN_RE.findall(search_text.lower())
 
 
+def _current_version_join():
+    return RecipeVersion.id == Recipe.current_version_id
+
+
 def _field_match_clause(like: str) -> Any:
     return or_(
-        col(Recipe.name).ilike(like),
-        col(Recipe.description).ilike(like),
-        col(Recipe.instructions).ilike(like),
-        col(Recipe.notes).ilike(like),
-        Recipe.ingredients.any(
+        col(RecipeVersion.name).ilike(like),
+        col(RecipeVersion.description).ilike(like),
+        col(RecipeVersion.instructions).ilike(like),
+        col(RecipeVersion.notes).ilike(like),
+        RecipeVersion.ingredients.any(
             or_(
                 col(Ingredient.name).ilike(like),
                 col(Ingredient.details).ilike(like),
@@ -217,12 +221,15 @@ def _lexical_hits(
     match_any = or_(*[_field_match_clause(like) for like in likes])
     query = (
         select(Recipe)
-        .distinct()
-        .join(Recipe.ingredients, isouter=True)
+        .join(RecipeVersion, _current_version_join())
         .where(and_(access, match_any))
         .options(
-            selectinload(Recipe.cover_image),
-            selectinload(Recipe.ingredients),
+            selectinload(Recipe.current_version).selectinload(
+                RecipeVersion.cover_image
+            ),
+            selectinload(Recipe.current_version).selectinload(
+                RecipeVersion.ingredients
+            ),
         )
         .limit(max(limit * 4, 80))
     )
@@ -279,7 +286,11 @@ def search_accessible_recipes(
             session.exec(
                 select(Recipe)
                 .where(Recipe.public)
-                .options(selectinload(Recipe.cover_image))
+                .options(
+                    selectinload(Recipe.current_version).selectinload(
+                        RecipeVersion.cover_image
+                    )
+                )
                 .limit(25)
             ).all()
         )
@@ -296,8 +307,12 @@ def search_accessible_recipes(
             select(Recipe)
             .where(access)
             .options(
-                selectinload(Recipe.cover_image),
-                selectinload(Recipe.ingredients),
+                selectinload(Recipe.current_version).selectinload(
+                    RecipeVersion.cover_image
+                ),
+                selectinload(Recipe.current_version).selectinload(
+                    RecipeVersion.ingredients
+                ),
             )
             .limit(500)
         ).all()

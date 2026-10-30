@@ -64,6 +64,14 @@ The admin seed also receives `SUPERUSER_GID` when set.
 - Routes under `/api/meal-plan-wizard/`. Pipeline stages: create session → ideate (SSE) → select → build (SSE) → commit.
 - Without `OPENROUTER_API_KEY`, the backend uses a deterministic stub LLM (`api/core/llm/client.py`). Set the key to call OpenRouter (`api/core/llm/client.py` → `OpenRouterLlmClient`). Optional `OPENROUTER_MODEL` defaults to `inception/mercury-2`. Tool helpers for user-scoped recipe search live in `api/core/llm/tools.py`.
 
+## Recipe version history
+
+- A recipe row is identity and metadata: `id`, `slug`, owner, household, `public`, and `current_version_id`.
+- Cooked content (name, description, instructions, notes, prep time, cover, ingredients) lives on append-only `recipe_version` rows. Saving, AI edit, import, and restore each append a version and move the head forward. Identical content does not create a new row. Toggling `public` does not.
+- `GET /api/recipe/{id}/` and `GET /api/recipe/slug/{slug}/` return the head version flattened into the usual recipe payload (`head_version_number`, `updated_on`, `slug` included).
+- History: `GET /api/recipe/{id}/versions/`, `GET /api/recipe/{id}/versions/{n}/`, `GET /api/recipe/{id}/versions/diff/?from=&to=`, `POST /api/recipe/{id}/versions/{n}/restore/`.
+- Create/update accept an `ingredients` array so one save is one version. The `/ingredient/` routes still work and each call appends its own version.
+
 ## Recipe semantic search
 
 - `GET /api/recipe/search/?searchText=...` runs hybrid lexical (ILIKE) + embedding cosine ranking over recipes the user can access (`api/core/recipe_search.py`).

@@ -21,12 +21,15 @@ function plan(id: number, plannedFor: string): PlannedRecipeDetail {
     created_by: user,
     recipe: {
       id,
+      slug: `recipe-${id}`,
       name: `Recipe ${id}`,
       description: "",
       created_on: "2026-01-01T00:00:00",
+      updated_on: "2026-01-01T00:00:00",
       created_by_id: user.id,
       household_id: 1,
-      public: false
+      public: false,
+      head_version_number: 1
     }
   };
 }

@@ -11,11 +11,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { splitInstructionSteps } from "@/lib/instructions";
 import { formatPrepTime, mediaUrl } from "@/lib/media";
+import { recipeReadPath } from "@/lib/recipePath";
 import { recipeToMarkdown } from "@/lib/recipeMarkdown";
 import { useSessionStore } from "@/stores/session";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import { paths } from "@/sitemap";
-import type { RecipeDetail } from "@/types";
+import type { RecipeDetail, RecipeVersionDetail } from "@/types";
+import RecipeHistoryDialog from "@/components/recipes/RecipeHistoryDialog.vue";
 import {
   formatIngredientAmountUnits,
   ingredientHasAmountOrUnits,
@@ -32,6 +34,9 @@ const router = useRouter();
 const route = useRoute();
 
 const recipe = ref<RecipeDetail>();
+const preview = ref<RecipeVersionDetail | null>(null);
+const historyOpen = ref(false);
+const restoring = ref(false);
 const deleteOpen = ref(false);
 const aiEditOpen = ref(false);
 const aiInstruction = ref("");
@@ -55,11 +60,26 @@ const returnUrl = computed(() => {
     : route.query.returnUrl;
   return param || paths.home;
 });
-const imageUrl = computed(() => mediaUrl(recipe.value?.cover_image?.url));
-const formattedTime = computed(() => formatPrepTime(recipe.value?.prep_time) || "—");
+const shown = computed(() => {
+  if (!recipe.value) return undefined;
+  if (!preview.value) return recipe.value;
+  return {
+    ...recipe.value,
+    name: preview.value.name,
+    description: preview.value.description,
+    instructions: preview.value.instructions,
+    notes: preview.value.notes ?? undefined,
+    prep_time: preview.value.prep_time ?? undefined,
+    cover_image: preview.value.cover_image ?? undefined,
+    cover_image_id: preview.value.cover_image_id ?? undefined,
+    ingredients: preview.value.ingredients
+  };
+});
+const imageUrl = computed(() => mediaUrl(shown.value?.cover_image?.url));
+const formattedTime = computed(() => formatPrepTime(shown.value?.prep_time) || "—");
 const canAiSave = computed(() => aiInstruction.value.trim().length > 0 && !aiSaving.value);
 const displayedIngredients = computed(() =>
-  (recipe.value?.ingredients ?? []).map((ingredient) => ({
+  (shown.value?.ingredients ?? []).map((ingredient) => ({
     ...ingredient,
     amountUnits: formatIngredientAmountUnits(ingredient.amount, ingredient.units),
     hasAmountUnits: ingredientHasAmountOrUnits(ingredient.amount, ingredient.units),
@@ -77,7 +97,8 @@ watch(aiEditOpen, (open) => {
 async function getRecipeDetails() {
   loading.value = true;
   try {
-    recipe.value = await get(`/recipe/${route.params.recipeId}/`);
+    preview.value = null;
+    recipe.value = await get(recipeReadPath(String(route.params.recipeId)));
   } catch (er) {
     if ((er as ApiError).status === 404) {
       router.push({ name: "not-found" });
@@ -93,7 +114,7 @@ async function copyRecipe() {
   if (!recipe.value || copying.value) return;
   copying.value = true;
   try {
-    await navigator.clipboard.writeText(recipeToMarkdown(recipe.value));
+    await navigator.clipboard.writeText(recipeToMarkdown(shown.value ?? recipe.value));
     toast.success("Recipe copied to clipboard.");
   } catch (er) {
     console.error(er);
@@ -102,11 +123,34 @@ async function copyRecipe() {
   copying.value = false;
 }
 
+async function restorePreview() {
+  if (!recipe.value || !preview.value || restoring.value) return;
+  restoring.value = true;
+  try {
+    recipe.value = await post<RecipeDetail>(
+      `/recipe/${recipe.value.id}/versions/${preview.value.version_number}/restore/`,
+      {}
+    );
+    preview.value = null;
+    syncAfterRecipeMutation();
+    toast.success("Restored as a new version.");
+  } catch (er) {
+    console.error(er);
+    toast.fromError(er, "Couldn’t restore that version.");
+  }
+  restoring.value = false;
+}
+
+function onHistoryRestored(detail: RecipeDetail) {
+  recipe.value = detail;
+  preview.value = null;
+}
+
 async function deleteRecipe() {
-  if (!owned.value) return;
+  if (!owned.value || !recipe.value) return;
   loading.value = true;
   try {
-    await del(`/recipe/${route.params.recipeId}/`);
+    await del(`/recipe/${recipe.value.id}/`);
     deleteOpen.value = false;
     syncAfterRecipeMutation();
     toast.success("Recipe deleted.");
@@ -119,10 +163,11 @@ async function deleteRecipe() {
 }
 
 async function applyAiEdit() {
-  if (!owned.value || !canAiSave.value) return;
+  if (!recipe.value || !owned.value || !canAiSave.value) return;
   aiSaving.value = true;
   try {
-    recipe.value = await post<RecipeDetail>(`/recipe/${route.params.recipeId}/ai-edit/`, {
+    preview.value = null;
+    recipe.value = await post<RecipeDetail>(`/recipe/${recipe.value.id}/ai-edit/`, {
       instruction: aiInstruction.value.trim()
     });
     syncAfterRecipeMutation();
@@ -150,9 +195,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div v-if="recipe" class="relative">
+  <div v-if="recipe && shown" class="relative">
     <div class="relative h-56 overflow-hidden">
-      <img :src="imageUrl" :alt="recipe.name" class="size-full object-cover" />
+      <img :src="imageUrl" :alt="shown.name" class="size-full object-cover" />
       <div
         class="absolute inset-0 bg-gradient-to-b from-background/55 via-transparent to-background"
       />
@@ -166,7 +211,7 @@ onMounted(async () => {
         >
           <ArrowLeft class="size-4 opacity-80" />
         </Button>
-        <div v-if="owned" class="flex items-center gap-2">
+        <div v-if="owned && !preview" class="flex items-center gap-2">
           <Button
             size="icon-sm"
             variant="secondary"
@@ -196,8 +241,34 @@ onMounted(async () => {
     <!-- No top border: hero gradient already divides — avoid stacked hard edges -->
     <div class="-mt-4 rounded-t-2xl border border-t-0 border-border bg-card px-5 pt-5 pb-8">
       <div class="flex items-start justify-between gap-3">
-        <h1 class="text-xl font-bold tracking-tight leading-tight">{{ recipe.name }}</h1>
+        <div class="min-w-0 flex-1">
+          <h1 class="text-xl font-bold tracking-tight leading-tight">{{ shown.name }}</h1>
+          <button
+            type="button"
+            class="mt-1 text-xs font-semibold text-[#22c55e]"
+            @click="historyOpen = true"
+          >
+            Version {{ preview?.version_number ?? recipe.head_version_number }} · History
+          </button>
+        </div>
         <Button size="sm" class="shrink-0" @click="scrollToIngredients">Cook</Button>
+      </div>
+
+      <div
+        v-if="preview"
+        class="mt-3 rounded-xl bg-secondary px-3 py-2.5 text-sm text-muted-foreground"
+      >
+        <p>
+          Viewing version {{ preview.version_number }} of {{ recipe.head_version_number }}.
+          Restoring saves it as a new version and keeps the rest of the history.
+        </p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" @click="preview = null">Latest</Button>
+          <Button v-if="canEdit" size="sm" :disabled="restoring" @click="restorePreview">
+            <LoaderCircle v-if="restoring" class="size-4 animate-spin" />
+            Restore this version
+          </Button>
+        </div>
       </div>
 
       <p v-if="!authored" class="mt-2 text-sm text-muted-foreground">
@@ -217,14 +288,14 @@ onMounted(async () => {
         </div>
         <div class="rounded-xl bg-secondary/50 px-3 py-3 text-center">
           <p class="text-xs text-muted-foreground">Ingredients</p>
-          <p class="mt-1 text-sm font-semibold">{{ recipe.ingredients.length }}</p>
+          <p class="mt-1 text-sm font-semibold">{{ shown.ingredients.length }}</p>
         </div>
       </div>
 
       <section class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">About</h2>
         <p class="text-base leading-relaxed text-muted-foreground whitespace-pre-wrap">
-          {{ recipe.description }}
+          {{ shown.description }}
         </p>
         <p v-if="recipe.public && owned" class="mt-2 text-xs text-[#4ade80]">
           This recipe is public.
@@ -254,17 +325,17 @@ onMounted(async () => {
       <section class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">Instructions</h2>
         <div class="space-y-2.5 font-sans text-base leading-relaxed text-muted-foreground">
-          <p v-for="(step, idx) in splitInstructionSteps(recipe.instructions)" :key="idx">
+          <p v-for="(step, idx) in splitInstructionSteps(shown.instructions)" :key="idx">
             {{ step }}
           </p>
         </div>
       </section>
 
-      <section v-if="recipe.notes" class="mt-5">
+      <section v-if="shown.notes" class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">Notes</h2>
         <pre
           class="font-sans text-base leading-relaxed whitespace-pre-wrap text-muted-foreground"
-          >{{ recipe.notes }}</pre
+          >{{ shown.notes }}</pre
         >
       </section>
 
@@ -278,6 +349,16 @@ onMounted(async () => {
         </Button>
       </div>
     </div>
+
+    <RecipeHistoryDialog
+      v-model:open="historyOpen"
+      :recipe-id="recipe.id"
+      :slug="recipe.slug"
+      :head-version-number="recipe.head_version_number"
+      :can-restore="canEdit"
+      @preview="preview = $event"
+      @restored="onHistoryRestored"
+    />
 
     <Dialog v-model:open="deleteOpen">
       <DialogContent class="max-w-sm border-border bg-card">
