@@ -10,10 +10,10 @@ Native iOS app for Sous Kit, built with [Expo](https://expo.dev) / React Native.
 | Navigation | `expo-router` (file-system routes, typed) |
 | Styling | NativeWind 4 (Tailwind CSS classes, shadcn-style components in `src/components/ui/`) |
 | Server state | `@tanstack/react-query` |
-| Local state | `zustand` (session, toasts, app lock) |
+| Local state | `zustand` (session, toasts) |
 | Auth storage | `expo-secure-store` (iOS Keychain) |
-| Sign-in | Email/password, Sign in with Apple (`expo-apple-authentication`), Google (`expo-auth-session`) |
-| App lock | Face ID / Touch ID via `expo-local-authentication` |
+| Sign-in | Email/password, Sign in with Apple (`expo-apple-authentication`), Google (`expo-auth-session`), passkey (`react-native-passkeys`) |
+| Session | 30-day idle window, refreshed every time the app comes to the foreground. No sign-in prompt inside that window. |
 | Fonts / icons | Figtree (`@expo-google-fonts`) / `lucide-react-native` |
 | Tests | Jest (`jest-expo`) + React Native Testing Library |
 
@@ -117,9 +117,11 @@ Invite QR codes and copy-link buttons share an HTTPS URL (`https://<host>/join/<
 
 Custom-scheme links (`souskit://join/<token>`) also route to the same screen for local testing.
 
-### Face ID unlock
+### Session and passkeys
 
-Account → Security → **Face ID unlock** gates the app behind Face ID / Touch ID (`expo-local-authentication`): prompts after the app has been away for an hour (cold start or return from background), with device-passcode fallback and a sign-out escape hatch. Returning within the hour resets the timer. The preference is stored in the Keychain; the row is hidden on devices without enrolled biometrics (and on web).
+Opening the app does not ask the user to sign in. The API session lasts 30 days from the last use (`SESSION_IDLE_DAYS`). Cold start and every return to the foreground call `GET /api/auth/verify-session/`, which mints a fresh token and resets that window. A network blip keeps the keychain session.
+
+After 30 days without use, the token is rejected and the login screen is shown. If this iPhone has saved a passkey (Account → **Add passkey**), the system Face ID sheet signs them back in. Password, Apple, and Google sign-in stay available. Passkeys are discoverable WebAuthn credentials for `WEBAUTHN_RP_ID` (default `sous-kit.com`), which must match `webcredentials:` in `app.config.ts` and the `webcredentials.apps` entry in `/.well-known/apple-app-site-association` (requires server `APPLE_TEAM_ID`). The Expo web preview cannot show the Face ID sheet; Jest covers the client and the API test covers registration and sign-in.
 
 ### Google sign-in on iOS (optional)
 
@@ -138,7 +140,7 @@ mobile/
     components/          UI + feature components
     api/                 API client wrappers
     stores/              zustand stores
-    lib/                 colors, query client, biometrics, …
+    lib/                 colors, query client, passkeys, …
     types/               shared API types (mirror web `src/types/`)
   assets/images/         icon, splash, souskit-mark
 ```

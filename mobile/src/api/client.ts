@@ -59,7 +59,7 @@ async function readErrorBody(response: Response): Promise<unknown> {
 
 /** Session expired / revoked — drop local session so the auth gate kicks in. */
 function handleUnauthorized() {
-  void useSessionStore.getState().clear();
+  void useSessionStore.getState().clear({ reauth: true });
   queryClient.clear();
 }
 

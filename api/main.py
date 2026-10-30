@@ -77,11 +77,16 @@ def _apple_app_site_association() -> JSONResponse:
         if app_id
         else []
     )
+    # webcredentials lets the iOS app use passkeys for this domain. The app id
+    # list matches Associated Domains (webcredentials:) on the bundle id.
     payload = {
         "applinks": {
             "apps": [],
             "details": details,
-        }
+        },
+        "webcredentials": {
+            "apps": [app_id] if app_id else [],
+        },
     }
     return JSONResponse(
         content=payload,

@@ -31,3 +31,10 @@ export const GOOGLE_IOS_CLIENT_ID: string = process.env.EXPO_PUBLIC_GOOGLE_IOS_C
 export const GOOGLE_WEB_CLIENT_ID: string = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? "";
 
 export const APP_NAME = "Sous Kit";
+
+/**
+ * How long the app can sit unused before it asks the user to sign in again.
+ * Must match `SESSION_IDLE_DAYS` in `api/core/config.py`. Every foreground
+ * visit resets the window; the app does not prompt inside it.
+ */
+export const SESSION_IDLE_DAYS = 30;

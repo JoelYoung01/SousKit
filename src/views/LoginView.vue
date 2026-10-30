@@ -84,6 +84,10 @@ async function onSubmit() {
     <div class="flex flex-col items-center gap-3 text-center">
       <img :src="souskitMark" alt="" class="size-20 object-contain" />
       <h1 class="text-3xl font-bold tracking-tighter text-foreground">{{ appTitle }}</h1>
+      <p class="max-w-[320px] text-sm text-muted-foreground">
+        You stay signed in while you use Sous Kit. After 30 days away, sign in again. On iPhone, a
+        passkey does that with Face ID.
+      </p>
     </div>
 
     <!--
