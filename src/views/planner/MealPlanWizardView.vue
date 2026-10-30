@@ -18,6 +18,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { useMealPlanWizardPrefs } from "@/composables/useMealPlanWizardPrefs";
 import { splitInstructionSteps } from "@/lib/instructions";
 import {
+  copyPreviousButtonLabel,
+  indexMealsByDay,
+  lookbackWindow,
+  mealCopySummary,
+  selectionLookbackWindow,
+  type CopiedMeal,
+  type MealCopyWindow
+} from "@/lib/duplicateMealPlan";
+import {
   addDays,
   endOfDay,
   formatPrepTime,
@@ -38,6 +47,7 @@ import {
   type MealPlanWizardProgressEvent,
   type MealPlanWizardSession,
   type MealPlanWizardStep,
+  type PlannedRecipeDetail,
   type RecipeCard,
   type RecipeDetail
 } from "@/types";
@@ -48,6 +58,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Link2,
   LoaderCircle,
   Plus,
@@ -180,6 +191,12 @@ const error = ref("");
 const refineText = ref("");
 const busy = ref(false);
 const loadingDays = ref(true);
+const copyOpen = ref(false);
+const copyLoading = ref(false);
+const copyWindow = ref<MealCopyWindow | null>(null);
+const copyMeals = ref<Record<string, CopiedMeal>>({});
+const copyWeekLabel = ref<string | null>(null);
+let copyRequestId = 0;
 const plannedTitles = ref<Record<string, string>>({});
 const expandedDays = ref<string[]>([]);
 const regenIdeaIds = ref<string[]>([]);
@@ -218,6 +235,14 @@ let observer: IntersectionObserver | null = null;
 let abortController: AbortController | null = null;
 
 const canContinueDays = computed(() => selectedDays.value.length > 0);
+const selectionCopyWindow = computed(() =>
+  selectionLookbackWindow(selectedDays.value.filter((key) => !isDayPast(key)))
+);
+const copyPreviousLabel = computed(() =>
+  selectionCopyWindow.value
+    ? copyPreviousButtonLabel(selectionCopyWindow.value.spanDays)
+    : "Copy previous"
+);
 const plannedSelectedCount = computed(
   () => selectedDays.value.filter((d) => Boolean(draftByDay.value[d])).length
 );
@@ -324,6 +349,135 @@ function selectWeekOpen(dayKeys: string[]) {
 function clearWeekDays(dayKeys: string[]) {
   const removeSet = new Set(dayKeys);
   selectedDays.value = selectedDays.value.filter((k) => !removeSet.has(k));
+}
+
+function futureDayKeys(dayKeys: string[]) {
+  return dayKeys.filter((key) => !isDayPast(key));
+}
+
+function formatKeyRange(start: string, end: string) {
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  const startDate = parseDateKey(start);
+  const endDate = parseDateKey(end);
+  if (!startDate || !endDate) return start;
+  if (start === end) return startDate.toLocaleDateString(undefined, opts);
+  return `${startDate.toLocaleDateString(undefined, opts)} – ${endDate.toLocaleDateString(undefined, opts)}`;
+}
+
+const copySummary = computed(() =>
+  copyWindow.value ? mealCopySummary(copyWindow.value, copyWeekLabel.value) : ""
+);
+const copyRangeLabel = computed(() => {
+  const window = copyWindow.value;
+  if (!window) return "";
+  return `${formatKeyRange(window.sourceStart, window.sourceEnd)} → ${formatKeyRange(window.targetStart, window.targetEnd)}`;
+});
+const copyableCount = computed(
+  () => copyWindow.value?.pairs.filter((pair) => copyMeals.value[pair.sourceKey]).length ?? 0
+);
+const copyDialogOpen = computed({
+  get: () => copyOpen.value,
+  set: (open: boolean) => {
+    if (!open) closeMealCopy();
+    else copyOpen.value = true;
+  }
+});
+
+async function openMealCopy(targetKeys: string[], spanDays: number, weekLabel: string | null) {
+  const window = lookbackWindow(targetKeys, spanDays);
+  if (!window) return;
+  const requestId = ++copyRequestId;
+  copyWeekLabel.value = weekLabel;
+  copyWindow.value = window;
+  copyMeals.value = {};
+  copyOpen.value = true;
+  copyLoading.value = true;
+  error.value = "";
+  try {
+    const start = parseDateKey(window.sourceStart);
+    const end = parseDateKey(window.sourceEnd);
+    if (!start || !end) return;
+    const plans = await post<PlannedRecipeDetail[]>("/planned-recipe/time-frame/", {
+      start: start.toISOString(),
+      end: endOfDay(end).toISOString()
+    });
+    if (requestId !== copyRequestId) return;
+    copyMeals.value = indexMealsByDay(
+      plans.map((plan) => ({
+        id: plan.id,
+        plannedFor: plan.planned_for,
+        recipeId: plan.recipe.id,
+        title: plan.recipe.name,
+        description: plan.recipe.description,
+        prepTime: plan.recipe.prep_time ?? null,
+        coverUrl: plan.recipe.cover_image?.url ?? null
+      }))
+    );
+  } catch (e) {
+    if (requestId !== copyRequestId) return;
+    copyOpen.value = false;
+    toast.fromError(e, "Couldn’t load previous dinners.");
+  } finally {
+    if (requestId === copyRequestId) copyLoading.value = false;
+  }
+}
+
+function openWeekCopy(dayKeys: string[], label: string) {
+  void openMealCopy(futureDayKeys(dayKeys), 7, label);
+}
+
+function openSelectionCopy() {
+  const window = selectionCopyWindow.value;
+  if (!window) return;
+  void openMealCopy(
+    window.pairs.map((pair) => pair.targetKey),
+    window.spanDays,
+    null
+  );
+}
+
+function closeMealCopy() {
+  copyRequestId += 1;
+  copyOpen.value = false;
+  copyLoading.value = false;
+}
+
+function replacingTitle(targetKey: string): string | null {
+  return draftByDay.value[targetKey]?.title || plannedTitles.value[targetKey] || null;
+}
+
+function applyMealCopy() {
+  const window = copyWindow.value;
+  if (!window || copyLoading.value) return;
+  const nextDrafts = { ...draftByDay.value };
+  const copiedTargets: string[] = [];
+  for (const pair of window.pairs) {
+    const meal = copyMeals.value[pair.sourceKey];
+    if (!meal) continue;
+    nextDrafts[pair.targetKey] = {
+      kind: "existing",
+      title: meal.title,
+      description: meal.description,
+      prep_time: meal.prepTime ?? null,
+      cover_url: meal.coverUrl ?? null,
+      recipeId: meal.recipeId,
+      builtRecipe: null
+    };
+    copiedTargets.push(pair.targetKey);
+  }
+  if (!copiedTargets.length) return;
+  draftByDay.value = nextDrafts;
+  selectedDays.value = [
+    ...new Set([...selectedDays.value, ...window.pairs.map((pair) => pair.targetKey)])
+  ].sort();
+  const count = copiedTargets.length;
+  closeMealCopy();
+  uiStep.value = "hub";
+  toast.success(
+    count === 1
+      ? "Copied 1 dinner. Review it, then save."
+      : `Copied ${count} dinners. Review them, then save.`
+  );
 }
 
 function loadAnotherWeek() {
@@ -1058,11 +1212,19 @@ onMounted(async () => {
   }
 
   if (typeof IntersectionObserver !== "undefined") {
+    // Load one week per time the sentinel scrolls into view. A tall window
+    // keeps the sentinel intersecting, and re-firing on that would append
+    // every future week in one pass.
+    let seenHidden = false;
+    let wasVisible = false;
     observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting) && uiStep.value === "days") {
+        const visible = entries.some((e) => e.isIntersecting);
+        if (!visible) seenHidden = true;
+        if (visible && seenHidden && !wasVisible && uiStep.value === "days") {
           weekCount.value += 1;
         }
+        wasVisible = visible;
       },
       { rootMargin: "120px" }
     );
@@ -1081,7 +1243,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="px-4 pt-4 pb-36">
+  <div class="px-4 pt-4 pb-48">
     <!-- Header -->
     <div class="flex items-center gap-2">
       <button
@@ -1118,7 +1280,8 @@ onUnmounted(() => {
       <p class="text-sm text-muted-foreground">
         <template v-if="loadingDays">Checking what’s already planned…</template>
         <template v-else>
-          Tap nights to include in your meal plan. Scroll down to add more weeks.
+          Tap nights to include in your meal plan. Copy last week onto a week, or copy the previous
+          stretch onto the nights you’ve selected.
         </template>
       </p>
 
@@ -1142,6 +1305,17 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+
+        <button
+          v-if="futureDayKeys(week.dayKeys).length"
+          type="button"
+          class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[rgba(34,197,94,0.35)] bg-[rgba(34,197,94,0.08)] py-2 text-[12px] font-semibold text-[#86efac] transition-opacity active:opacity-70"
+          :data-testid="`wizard-copy-week-${week.weekIndex}`"
+          @click="openWeekCopy(week.dayKeys, week.label)"
+        >
+          <Copy class="size-3.5" />
+          Copy last week
+        </button>
 
         <div class="overflow-hidden rounded-xl border border-border bg-card">
           <button
@@ -1280,6 +1454,17 @@ onUnmounted(() => {
           Fill plan
         </Button>
       </div>
+
+      <Button
+        variant="outline"
+        class="w-full gap-1.5"
+        data-testid="wizard-copy-previous"
+        :disabled="busy || !selectionCopyWindow"
+        @click="openSelectionCopy"
+      >
+        <Copy class="size-4" />
+        {{ copyPreviousLabel }}
+      </Button>
 
       <div class="space-y-2.5">
         <div
@@ -1806,15 +1991,28 @@ onUnmounted(() => {
       v-if="uiStep === 'days'"
       class="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-40 w-full max-w-md -translate-x-1/2 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur-sm"
     >
-      <Button
-        type="button"
-        class="w-full"
-        data-testid="wizard-continue-days"
-        :disabled="!canContinueDays || busy || loadingDays"
-        @click="uiStep = 'hub'"
-      >
-        Continue with {{ selectedDays.length }} night{{ selectedDays.length === 1 ? "" : "s" }}
-      </Button>
+      <div class="flex flex-col gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          class="w-full gap-1.5"
+          data-testid="wizard-copy-previous"
+          :disabled="!selectionCopyWindow || busy || loadingDays"
+          @click="openSelectionCopy"
+        >
+          <Copy class="size-4" />
+          {{ copyPreviousLabel }}
+        </Button>
+        <Button
+          type="button"
+          class="w-full"
+          data-testid="wizard-continue-days"
+          :disabled="!canContinueDays || busy || loadingDays"
+          @click="uiStep = 'hub'"
+        >
+          Continue with {{ selectedDays.length }} night{{ selectedDays.length === 1 ? "" : "s" }}
+        </Button>
+      </div>
     </div>
 
     <div
@@ -1826,6 +2024,82 @@ onUnmounted(() => {
         {{ busy ? "Saving…" : "Save" }}
       </Button>
     </div>
+
+    <!-- COPY PREVIOUS MEALS -->
+    <Dialog v-model:open="copyDialogOpen">
+      <DialogContent class="max-w-sm border-border bg-card">
+        <DialogHeader>
+          <DialogTitle>Copy previous meals</DialogTitle>
+          <DialogDescription>{{ copySummary }}</DialogDescription>
+        </DialogHeader>
+        <p v-if="copyRangeLabel" class="-mt-2 text-xs text-faint">{{ copyRangeLabel }}</p>
+
+        <div class="max-h-[50dvh] space-y-2 overflow-y-auto pr-1">
+          <template v-if="copyLoading">
+            <div
+              v-for="n in 4"
+              :key="n"
+              class="space-y-1.5 rounded-xl border border-border px-3 py-2.5"
+            >
+              <Skeleton class="h-3 w-32" />
+              <Skeleton class="h-4 w-40" />
+            </div>
+          </template>
+          <template v-else-if="copyWindow">
+            <div
+              v-for="pair in copyWindow.pairs"
+              :key="pair.targetKey"
+              class="rounded-xl border border-border bg-secondary/40 px-3 py-2.5"
+            >
+              <p class="text-[11px] font-bold uppercase tracking-wide text-faint">
+                {{ dayLabel(pair.targetKey) }}
+                <span class="font-semibold tracking-normal text-muted-foreground normal-case">
+                  ← {{ dayLabel(pair.sourceKey) }}
+                </span>
+              </p>
+              <p v-if="copyMeals[pair.sourceKey]" class="mt-0.5 text-sm font-semibold">
+                {{ copyMeals[pair.sourceKey]!.title }}
+              </p>
+              <p v-else class="mt-0.5 text-sm text-muted-foreground">Nothing planned</p>
+              <p
+                v-if="copyMeals[pair.sourceKey]?.extraTitles.length"
+                class="mt-0.5 text-[11px] text-faint"
+              >
+                Also on that night: {{ copyMeals[pair.sourceKey]!.extraTitles.join(", ") }}. This
+                copy keeps the first dinner.
+              </p>
+              <p
+                v-if="copyMeals[pair.sourceKey] && replacingTitle(pair.targetKey)"
+                class="mt-0.5 text-[11px] text-muted-foreground"
+              >
+                {{
+                  replacingTitle(pair.targetKey) === copyMeals[pair.sourceKey]!.title
+                    ? "Already on this night"
+                    : `Replaces ${replacingTitle(pair.targetKey)}`
+                }}
+              </p>
+            </div>
+          </template>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="closeMealCopy">Cancel</Button>
+          <Button
+            data-testid="wizard-copy-confirm"
+            :disabled="copyLoading || copyableCount === 0"
+            @click="applyMealCopy"
+          >
+            {{
+              copyableCount === 0
+                ? "Nothing to copy"
+                : copyableCount === 1
+                  ? "Copy 1 dinner"
+                  : `Copy ${copyableCount} dinners`
+            }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- NIGHT ACTION MENU DIALOG -->
     <Dialog v-model:open="menuDialogOpen">

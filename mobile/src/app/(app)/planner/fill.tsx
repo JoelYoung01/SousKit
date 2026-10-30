@@ -38,6 +38,15 @@ import {
   startOfDay,
   toDateKey
 } from "@/lib/dates";
+import {
+  copyPreviousButtonLabel,
+  indexMealsByDay,
+  lookbackWindow,
+  mealCopySummary,
+  selectionLookbackWindow,
+  type CopiedMeal,
+  type MealCopyWindow
+} from "@/lib/duplicateMealPlan";
 import { tapHaptic } from "@/lib/haptics";
 import { splitInstructionSteps } from "@/lib/instructions";
 import { mediaSource } from "@/lib/media";
@@ -68,6 +77,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Link2,
   Plus,
   RefreshCw,
@@ -147,6 +157,12 @@ export default function MealPlanWizardScreen() {
   const [refineText, setRefineText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingDays, setLoadingDays] = useState(!recipeMode);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copyWindow, setCopyWindow] = useState<MealCopyWindow | null>(null);
+  const [copyMeals, setCopyMeals] = useState<Record<string, CopiedMeal>>({});
+  const [copyWeekLabel, setCopyWeekLabel] = useState<string | null>(null);
+  const copyRequestRef = useRef(0);
   const [plannedTitles, setPlannedTitles] = useState<Record<string, string>>({});
   const [expandedDays, setExpandedDays] = useState<string[]>([]);
   const [regenIdeaIds, setRegenIdeaIds] = useState<string[]>([]);
@@ -171,7 +187,7 @@ export default function MealPlanWizardScreen() {
 
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<MealPlanWizardSession | null>(null);
-  const autoLoadLockRef = useRef<number>(0);
+  const awayFromBottomRef = useRef(true);
   const findInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -246,15 +262,20 @@ export default function MealPlanWizardScreen() {
     if (uiStep !== "days") return;
     const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
-    if (distanceFromBottom < 140 && autoLoadLockRef.current !== weekCount) {
-      autoLoadLockRef.current = weekCount;
+    // One extra week each time the user scrolls back to the bottom. Staying
+    // there must not chain-load every future week.
+    if (distanceFromBottom > 240) {
+      awayFromBottomRef.current = true;
+      return;
+    }
+    if (distanceFromBottom < 140 && awayFromBottomRef.current) {
+      awayFromBottomRef.current = false;
       setWeekCount((c) => c + 1);
     }
   };
 
   const loadAnotherWeek = () => {
     tapHaptic();
-    autoLoadLockRef.current = weekCount + 1;
     setWeekCount((c) => c + 1);
   };
 
@@ -278,6 +299,111 @@ export default function MealPlanWizardScreen() {
     setSelectedDays((prev) => prev.filter((k) => !removeSet.has(k)));
   };
 
+  const futureDayKeys = (dayKeys: string[]) => dayKeys.filter((key) => !isDayPast(key));
+
+  const formatKeyRange = (start: string, end: string) => {
+    const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+    const startDate = parseDateKey(start);
+    const endDate = parseDateKey(end);
+    if (!startDate || !endDate) return start;
+    if (start === end) return startDate.toLocaleDateString(undefined, opts);
+    return `${startDate.toLocaleDateString(undefined, opts)} – ${endDate.toLocaleDateString(undefined, opts)}`;
+  };
+
+  const closeMealCopy = () => {
+    copyRequestRef.current += 1;
+    setCopyOpen(false);
+    setCopyLoading(false);
+  };
+
+  const openMealCopy = async (targetKeys: string[], spanDays: number, weekLabel: string | null) => {
+    const window = lookbackWindow(targetKeys, spanDays);
+    if (!window) return;
+    const requestId = ++copyRequestRef.current;
+    setCopyWeekLabel(weekLabel);
+    setCopyWindow(window);
+    setCopyMeals({});
+    setCopyOpen(true);
+    setCopyLoading(true);
+    setError("");
+    try {
+      const start = parseDateKey(window.sourceStart);
+      const end = parseDateKey(window.sourceEnd);
+      if (!start || !end) return;
+      const plans = await fetchPlansBetween(start, end);
+      if (requestId !== copyRequestRef.current) return;
+      setCopyMeals(
+        indexMealsByDay(
+          plans.map((plan) => ({
+            id: plan.id,
+            plannedFor: plan.planned_for,
+            recipeId: plan.recipe.id,
+            title: plan.recipe.name,
+            description: plan.recipe.description,
+            prepTime: plan.recipe.prep_time ?? null,
+            coverUrl: plan.recipe.cover_image?.url ?? null
+          }))
+        )
+      );
+    } catch (e) {
+      if (requestId !== copyRequestRef.current) return;
+      setCopyOpen(false);
+      toast.fromError(e, "Couldn’t load previous dinners.");
+    } finally {
+      if (requestId === copyRequestRef.current) setCopyLoading(false);
+    }
+  };
+
+  const openWeekCopy = (dayKeys: string[], label: string) => {
+    tapHaptic();
+    void openMealCopy(futureDayKeys(dayKeys), 7, label);
+  };
+
+  const openSelectionCopy = () => {
+    if (!selectionCopyWindow) return;
+    tapHaptic();
+    void openMealCopy(
+      selectionCopyWindow.pairs.map((pair) => pair.targetKey),
+      selectionCopyWindow.spanDays,
+      null
+    );
+  };
+
+  const replacingTitle = (targetKey: string): string | null =>
+    draftByDay[targetKey]?.title || plannedTitles[targetKey] || null;
+
+  const applyMealCopy = () => {
+    if (!copyWindow || copyLoading) return;
+    const nextDrafts = { ...draftByDay };
+    const copiedTargets: string[] = [];
+    for (const pair of copyWindow.pairs) {
+      const meal = copyMeals[pair.sourceKey];
+      if (!meal) continue;
+      nextDrafts[pair.targetKey] = {
+        kind: "existing",
+        title: meal.title,
+        description: meal.description,
+        prep_time: meal.prepTime ?? null,
+        cover_url: meal.coverUrl ?? null,
+        recipeId: meal.recipeId,
+        builtRecipe: null
+      };
+      copiedTargets.push(pair.targetKey);
+    }
+    if (!copiedTargets.length) return;
+    const targetKeys = copyWindow.pairs.map((pair) => pair.targetKey);
+    setDraftByDay(nextDrafts);
+    setSelectedDays((prev) => [...new Set([...prev, ...targetKeys])].sort());
+    const count = copiedTargets.length;
+    closeMealCopy();
+    setUiStep("hub");
+    toast.success(
+      count === 1
+        ? "Copied 1 dinner. Review it, then save."
+        : `Copied ${count} dinners. Review them, then save.`
+    );
+  };
+
   const dayLabel = (key: string) => {
     const date = parseDateKey(key);
     if (!date) return key;
@@ -293,6 +419,19 @@ export default function MealPlanWizardScreen() {
 
   // ---- Derived counts ----
   const canContinueDays = selectedDays.length > 0;
+  const selectionCopyWindow = selectionLookbackWindow(
+    selectedDays.filter((key) => key >= todayKey)
+  );
+  const copyPreviousLabel = selectionCopyWindow
+    ? copyPreviousButtonLabel(selectionCopyWindow.spanDays)
+    : "Copy previous";
+  const copySummary = copyWindow ? mealCopySummary(copyWindow, copyWeekLabel) : "";
+  const copyRangeLabel = copyWindow
+    ? `${formatKeyRange(copyWindow.sourceStart, copyWindow.sourceEnd)} → ${formatKeyRange(copyWindow.targetStart, copyWindow.targetEnd)}`
+    : "";
+  const copyableCount = copyWindow
+    ? copyWindow.pairs.filter((pair) => copyMeals[pair.sourceKey]).length
+    : 0;
   const plannedSelectedCount = useMemo(
     () => selectedDays.filter((d) => Boolean(draftByDay[d])).length,
     [selectedDays, draftByDay]
@@ -974,7 +1113,7 @@ export default function MealPlanWizardScreen() {
             <Text className="text-sm text-muted-foreground">
               {loadingDays
                 ? "Checking what’s already planned…"
-                : "Tap nights to include in your meal plan. Scroll down to add more weeks."}
+                : "Tap nights to include in your meal plan. Copy last week onto a week, or copy the previous stretch onto the nights you’ve selected."}
             </Text>
 
             {weeks.map((week) => (
@@ -990,6 +1129,21 @@ export default function MealPlanWizardScreen() {
                     </Pressable>
                   </View>
                 </View>
+
+                {futureDayKeys(week.dayKeys).length ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Copy last week onto ${week.label}`}
+                    testID={`wizard-copy-week-${week.weekIndex}`}
+                    onPress={() => openWeekCopy(week.dayKeys, week.label)}
+                    className="flex-row items-center justify-center gap-1.5 rounded-xl border border-[#22c55e]/35 bg-[#22c55e]/10 py-2 active:opacity-70"
+                  >
+                    <Copy size={14} color={colors.successSoft} />
+                    <Text className="font-sans-semibold text-[12px] text-success-soft">
+                      Copy last week
+                    </Text>
+                  </Pressable>
+                ) : null}
 
                 <View className="overflow-hidden rounded-xl border border-border bg-card">
                   {week.days.map((day, i) => {
@@ -1145,6 +1299,16 @@ export default function MealPlanWizardScreen() {
                 Fill plan
               </Button>
             </View>
+
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={busy || !selectionCopyWindow}
+              onPress={openSelectionCopy}
+            >
+              <Copy size={16} color={colors.foreground} />
+              {copyPreviousLabel}
+            </Button>
 
             {/* Night-by-night cards */}
             <View className="gap-2.5">
@@ -1844,17 +2008,28 @@ export default function MealPlanWizardScreen() {
           className="border-t border-border/80 bg-background/95 px-4 pt-3"
           style={{ paddingBottom: Math.max(insets.bottom, 16) }}
         >
-          <Button
-            className="w-full"
-            disabled={!canContinueDays || busy || loadingDays}
-            onPress={() => {
-              tapHaptic();
-              setError("");
-              setUiStep("hub");
-            }}
-          >
-            {`Continue with ${selectedDays.length} night${selectedDays.length === 1 ? "" : "s"}`}
-          </Button>
+          <View className="gap-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={!selectionCopyWindow || busy || loadingDays}
+              onPress={openSelectionCopy}
+            >
+              <Copy size={16} color={colors.foreground} />
+              {copyPreviousLabel}
+            </Button>
+            <Button
+              className="w-full"
+              disabled={!canContinueDays || busy || loadingDays}
+              onPress={() => {
+                tapHaptic();
+                setError("");
+                setUiStep("hub");
+              }}
+            >
+              {`Continue with ${selectedDays.length} night${selectedDays.length === 1 ? "" : "s"}`}
+            </Button>
+          </View>
         </View>
       ) : null}
 
@@ -1883,6 +2058,72 @@ export default function MealPlanWizardScreen() {
           </Button>
         </View>
       ) : null}
+
+      {/* COPY PREVIOUS MEALS */}
+      <Sheet visible={copyOpen} onClose={closeMealCopy}>
+        <Text className="px-1 pb-1 font-sans-semibold text-base">Copy previous meals</Text>
+        <Text className="px-1 text-sm text-muted-foreground">{copySummary}</Text>
+        {copyRangeLabel ? (
+          <Text className="px-1 pb-3 text-xs text-faint">{copyRangeLabel}</Text>
+        ) : (
+          <View className="pb-3" />
+        )}
+        <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+          {copyLoading ? (
+            <View className="gap-2">
+              {[0, 1, 2, 3].map((n) => (
+                <Skeleton key={n} className="h-14 w-full rounded-xl" />
+              ))}
+            </View>
+          ) : (
+            <View className="gap-2">
+              {copyWindow?.pairs.map((pair) => {
+                const meal = copyMeals[pair.sourceKey];
+                const replacing = replacingTitle(pair.targetKey);
+                return (
+                  <View
+                    key={pair.targetKey}
+                    className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5"
+                  >
+                    <Text className="font-sans-bold text-[11px] uppercase tracking-wide text-faint">
+                      {dayLabel(pair.targetKey)}
+                      <Text className="font-sans-semibold text-[11px] text-muted-foreground">
+                        {`  ←  ${dayLabel(pair.sourceKey)}`}
+                      </Text>
+                    </Text>
+                    <Text className={meal ? "mt-0.5 font-sans-semibold text-sm" : "mt-0.5 text-sm text-muted-foreground"}>
+                      {meal ? meal.title : "Nothing planned"}
+                    </Text>
+                    {meal && meal.extraTitles.length ? (
+                      <Text className="mt-0.5 text-[11px] text-faint">
+                        Also on that night: {meal.extraTitles.join(", ")}. This copy keeps the first
+                        dinner.
+                      </Text>
+                    ) : null}
+                    {meal && replacing ? (
+                      <Text className="mt-0.5 text-[11px] text-muted-foreground">
+                        {replacing === meal.title ? "Already on this night" : `Replaces ${replacing}`}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+        <View className="mt-3 flex-row gap-2">
+          <Button variant="outline" className="flex-1" onPress={closeMealCopy}>
+            Cancel
+          </Button>
+          <Button className="flex-1" disabled={copyLoading || copyableCount === 0} onPress={applyMealCopy}>
+            {copyableCount === 0
+              ? "Nothing to copy"
+              : copyableCount === 1
+                ? "Copy 1 dinner"
+                : `Copy ${copyableCount} dinners`}
+          </Button>
+        </View>
+      </Sheet>
 
       {/* NIGHT ACTION MENU SHEET (Generate / Choose from existing / Import) */}
       <Sheet visible={menuNightKey !== null} onClose={() => setMenuNightKey(null)}>
