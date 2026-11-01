@@ -1,7 +1,21 @@
+import {
+  SheetBodyMaxProvider,
+  sheetBodyMaxHeight,
+  sheetContentBottomPadding,
+  sheetPanelMaxHeight
+} from "@/components/ui/sheet-layout";
 import { KeyboardStickyView } from "@/components/ui/keyboard";
 import { cn } from "@/lib/cn";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View
+} from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import Animated, {
@@ -18,6 +32,8 @@ const OPEN_SPRING = { damping: 28, stiffness: 260, mass: 0.9 };
 const SNAP_SPRING = { damping: 30, stiffness: 300, mass: 0.9 };
 const DISMISS_DISTANCE = 80;
 const DISMISS_VELOCITY = 900;
+const HANDLE_HEIGHT_ESTIMATE = 32;
+const FOOTER_HEIGHT_ESTIMATE = 68;
 
 type SheetMotion = {
   translateY: SharedValue<number>;
@@ -52,24 +68,38 @@ function animateSheetOut(
   });
 }
 
+function rememberHeight(current: number | null, next: number): number | null {
+  const rounded = Math.ceil(next);
+  return current === rounded ? current : rounded;
+}
+
 /**
  * Bottom sheet: scrim fade + panel slide, drag-down to dismiss.
  * Uses RNGH + Reanimated so the handle drag works inside a Modal
  * (PanResponder alone often fails to capture there).
- * Lifts with the keyboard via KeyboardStickyView so inputs stay visible.
- * Tall sheets should put scrollable lists in their own ScrollView (not the
- * whole body) so action rows can stay pinned above the keyboard.
+ *
+ * The panel lifts with the keyboard via KeyboardStickyView, and its max
+ * height shrinks by that same keyboard height. A keyboard-sized spacer
+ * inside the panel would double-count that offset.
+ *
+ * Content-sized sheets scroll their body once it exceeds the room above
+ * the keyboard. Put submit/cancel rows in `footer` so a growing field
+ * cannot push them behind the keyboard (a multiline input keeps the
+ * keyboard up — Return inserts a newline).
  */
 export function Sheet({
   visible,
   onClose,
   children,
+  footer,
   className,
   fullHeight = false
 }: {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  /** Pinned to the bottom of the panel, above the keyboard. */
+  footer?: ReactNode;
   className?: string;
   /** Stretch to nearly the full screen (minus a small top peek of scrim). */
   fullHeight?: boolean;
@@ -78,6 +108,10 @@ export function Sheet({
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardState((s) => (s.isVisible ? s.height : 0));
   const [mounted, setMounted] = useState(visible);
+  const [handleHeight, setHandleHeight] = useState<number | null>(null);
+  const [footerHeight, setFooterHeight] = useState<number | null>(null);
+  const [bodyContentHeight, setBodyContentHeight] = useState(0);
+  const [trackedVisible, setTrackedVisible] = useState(visible);
   const translateY = useSharedValue(height);
   const scrim = useSharedValue(0);
   const dragStartY = useSharedValue(0);
@@ -103,6 +137,13 @@ export function Sheet({
   // Mount as soon as the caller asks for visibility (adjust-state-in-render
   // pattern); unmount happens after the exit animation completes.
   if (visible && !mounted) setMounted(true);
+  // Drop the previous body measurement before paint so a reopened sheet
+  // doesn't flash at the last drawer's height. The scroll view reports the
+  // new content size on layout.
+  if (visible !== trackedVisible) {
+    setTrackedVisible(visible);
+    if (visible && bodyContentHeight !== 0) setBodyContentHeight(0);
+  }
 
   const finishUnmount = useCallback(() => {
     setMounted(false);
@@ -172,11 +213,23 @@ export function Sheet({
 
   if (!mounted) return null;
 
-  // Content-sized sheets stay under 88% of the visible viewport; full-height
-  // sheets fill to just below the status bar so a sliver of scrim peeks above.
-  const panelMaxHeight = fullHeight
-    ? Math.max(240, height - Math.max(insets.top, 8) - keyboardHeight)
-    : (height - keyboardHeight) * 0.88;
+  const panelMaxHeight = sheetPanelMaxHeight({
+    windowHeight: height,
+    keyboardHeight,
+    topInset: insets.top,
+    fullHeight
+  });
+  const bottomPadding = sheetContentBottomPadding(keyboardHeight, insets.bottom);
+  const bodyMaxHeight = sheetBodyMaxHeight({
+    panelMaxHeight,
+    handleHeight: handleHeight ?? HANDLE_HEIGHT_ESTIMATE,
+    footerHeight: footer ? (footerHeight ?? FOOTER_HEIGHT_ESTIMATE) : 0,
+    bottomPadding
+  });
+  // Hug the body until it hits the cap, then scroll. A plain flexGrow ScrollView
+  // stretches to maxHeight and would turn every short menu into a tall drawer.
+  const bodyHeight =
+    bodyContentHeight > 0 ? Math.min(bodyContentHeight, bodyMaxHeight) : undefined;
   const panelHeight = fullHeight ? panelMaxHeight : undefined;
 
   return (
@@ -210,7 +263,7 @@ export function Sheet({
                 style={{
                   maxHeight: panelMaxHeight,
                   height: panelHeight,
-                  paddingBottom: insets.bottom + 12
+                  paddingBottom: bottomPadding
                 }}
               >
                 <GestureDetector gesture={pan}>
@@ -219,13 +272,57 @@ export function Sheet({
                     accessibilityLabel="Dismiss sheet"
                     accessibilityHint="Drag down to close"
                     className="items-center pb-2 pt-3"
+                    onLayout={(event) => {
+                      const next = event.nativeEvent.layout.height;
+                      setHandleHeight((current) => rememberHeight(current, next));
+                    }}
                     // Generous hit target so the drawer feels grabable.
                     hitSlop={{ top: 8, bottom: 12, left: 24, right: 24 }}
                   >
                     <View className="h-1.5 w-10 rounded-full bg-border" />
                   </View>
                 </GestureDetector>
-                <View className={fullHeight ? "min-h-0 flex-1" : undefined}>{children}</View>
+                <SheetBodyMaxProvider maxHeight={bodyMaxHeight}>
+                  {fullHeight ? (
+                    <View className="min-h-0 flex-1" testID="sheet-body">
+                      {children}
+                    </View>
+                  ) : (
+                    <ScrollView
+                      testID="sheet-body"
+                      style={{
+                        flexGrow: 0,
+                        flexShrink: 1,
+                        maxHeight: bodyMaxHeight,
+                        height: bodyHeight
+                      }}
+                      contentContainerStyle={{ flexGrow: 0 }}
+                      keyboardShouldPersistTaps="handled"
+                      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                      nestedScrollEnabled
+                      alwaysBounceVertical={false}
+                      showsVerticalScrollIndicator
+                      onContentSizeChange={(_width, nextHeight) => {
+                        const rounded = Math.ceil(nextHeight);
+                        setBodyContentHeight((current) => (current === rounded ? current : rounded));
+                      }}
+                    >
+                      {children}
+                    </ScrollView>
+                  )}
+                </SheetBodyMaxProvider>
+                {footer ? (
+                  <View
+                    testID="sheet-footer"
+                    className="pt-3"
+                    onLayout={(event) => {
+                      const next = event.nativeEvent.layout.height;
+                      setFooterHeight((current) => rememberHeight(current, next));
+                    }}
+                  >
+                    {footer}
+                  </View>
+                ) : null}
               </View>
             </KeyboardStickyView>
           </Animated.View>

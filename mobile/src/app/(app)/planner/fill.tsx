@@ -2060,7 +2060,28 @@ export default function MealPlanWizardScreen() {
       ) : null}
 
       {/* COPY PREVIOUS MEALS */}
-      <Sheet visible={copyOpen} onClose={closeMealCopy}>
+      <Sheet
+        visible={copyOpen}
+        onClose={closeMealCopy}
+        footer={
+          <View className="flex-row gap-2">
+            <Button variant="outline" className="flex-1" onPress={closeMealCopy}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={copyLoading || copyableCount === 0}
+              onPress={applyMealCopy}
+            >
+              {copyableCount === 0
+                ? "Nothing to copy"
+                : copyableCount === 1
+                  ? "Copy 1 dinner"
+                  : `Copy ${copyableCount} dinners`}
+            </Button>
+          </View>
+        }
+      >
         <Text className="px-1 pb-1 font-sans-semibold text-base">Copy previous meals</Text>
         <Text className="px-1 text-sm text-muted-foreground">{copySummary}</Text>
         {copyRangeLabel ? (
@@ -2068,7 +2089,7 @@ export default function MealPlanWizardScreen() {
         ) : (
           <View className="pb-3" />
         )}
-        <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+        <View>
           {copyLoading ? (
             <View className="gap-2">
               {[0, 1, 2, 3].map((n) => (
@@ -2110,18 +2131,6 @@ export default function MealPlanWizardScreen() {
               })}
             </View>
           )}
-        </ScrollView>
-        <View className="mt-3 flex-row gap-2">
-          <Button variant="outline" className="flex-1" onPress={closeMealCopy}>
-            Cancel
-          </Button>
-          <Button className="flex-1" disabled={copyLoading || copyableCount === 0} onPress={applyMealCopy}>
-            {copyableCount === 0
-              ? "Nothing to copy"
-              : copyableCount === 1
-                ? "Copy 1 dinner"
-                : `Copy ${copyableCount} dinners`}
-          </Button>
         </View>
       </Sheet>
 
@@ -2301,6 +2310,32 @@ export default function MealPlanWizardScreen() {
         onClose={() => {
           if (!importing) setImportSheetOpen(false);
         }}
+        footer={
+          importMethod === "link" ? (
+            <View className="flex-row gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={importing}
+                onPress={() => setImportSheetOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!importUrl.trim() || importing}
+                onPress={() => void handleImportForNight()}
+              >
+                {importing ? <Spinner color={colors.foreground} /> : null}
+                {importing ? "Importing…" : "Import & attach"}
+              </Button>
+            </View>
+          ) : (
+            <Button variant="outline" className="w-full" onPress={() => setImportSheetOpen(false)}>
+              Close
+            </Button>
+          )
+        }
       >
         <Text className="px-1 pb-1 font-sans-semibold text-lg">
           Import for {dayLabel(activeNightKey ?? "")}
@@ -2346,41 +2381,14 @@ export default function MealPlanWizardScreen() {
             {importError ? (
               <Text className="mt-2 text-xs text-destructive">{importError}</Text>
             ) : null}
-            <View className="mt-4 flex-row gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                disabled={importing}
-                onPress={() => setImportSheetOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="flex-1"
-                disabled={!importUrl.trim() || importing}
-                onPress={() => void handleImportForNight()}
-              >
-                {importing ? <Spinner color={colors.foreground} /> : null}
-                {importing ? "Importing…" : "Import & attach"}
-              </Button>
-            </View>
           </View>
         ) : (
-          <View>
-            <View className="min-h-[140px] items-center justify-center rounded-xl border border-dashed border-border bg-secondary/50 px-4">
-              <Camera size={28} color={colors.green500} />
-              <Text className="mt-2 font-sans-semibold text-sm">Scan a photo</Text>
-              <Text className="mt-1 text-center text-xs text-muted-foreground">
-                Cookbook pages and handwritten cards — not available yet.
-              </Text>
-            </View>
-            <Button
-              variant="outline"
-              className="mt-3 w-full"
-              onPress={() => setImportSheetOpen(false)}
-            >
-              Close
-            </Button>
+          <View className="min-h-[140px] items-center justify-center rounded-xl border border-dashed border-border bg-secondary/50 px-4">
+            <Camera size={28} color={colors.green500} />
+            <Text className="mt-2 font-sans-semibold text-sm">Scan a photo</Text>
+            <Text className="mt-1 text-center text-xs text-muted-foreground">
+              Cookbook pages and handwritten cards — not available yet.
+            </Text>
           </View>
         )}
       </Sheet>
