@@ -21,16 +21,11 @@ jest.mock("@/stores/toast", () => ({
   }
 }));
 
-jest.mock("@/components/ui/sheet", () => ({
-  Sheet: ({
-    visible,
-    children
-  }: {
-    visible: boolean;
-    onClose: () => void;
-    children: React.ReactNode;
-  }) => (visible ? children : null)
-}));
+jest.mock(
+  "@/components/ui/sheet",
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
+  () => require("@/test-utils/sheet-mock")
+);
 
 describe("RecipeAiEditSheet", () => {
   beforeEach(() => {

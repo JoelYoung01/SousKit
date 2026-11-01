@@ -1,6 +1,7 @@
 import { aiEditRecipe } from "@/api/recipes";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
+import { cappedFieldMaxHeight, useSheetBodyMaxHeight } from "@/components/ui/sheet-layout";
 import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +18,60 @@ type Props = {
   onClose: () => void;
   onApplied?: () => void;
 };
+
+const HEADER_HEIGHT_ESTIMATE = 64;
+const FIELD_GAP = 12;
+
+function AiEditFields({
+  instruction,
+  onChangeInstruction,
+  saving
+}: {
+  instruction: string;
+  onChangeInstruction: (value: string) => void;
+  saving: boolean;
+}) {
+  const bodyMaxHeight = useSheetBodyMaxHeight();
+  const [headerHeight, setHeaderHeight] = useState(HEADER_HEIGHT_ESTIMATE);
+  const fieldMaxHeight = cappedFieldMaxHeight(bodyMaxHeight, headerHeight + FIELD_GAP);
+
+  return (
+    <View className="gap-3">
+      <View
+        className="flex-row items-center gap-2"
+        onLayout={(event) => {
+          const next = Math.ceil(event.nativeEvent.layout.height);
+          setHeaderHeight((current) => (current === next ? current : next));
+        }}
+      >
+        <View className="h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
+          <Sparkles size={18} color={colors.green500} />
+        </View>
+        <View className="min-w-0 flex-1">
+          <Text className="font-sans-semibold text-base">Edit with AI</Text>
+          <Text className="text-xs text-muted-foreground">
+            Describe what to change — ingredients, servings, style, etc.
+          </Text>
+        </View>
+      </View>
+
+      <Textarea
+        value={instruction}
+        onChangeText={onChangeInstruction}
+        editable={!saving}
+        placeholder="e.g. Make it dairy-free and cut prep time in half"
+        scrollEnabled
+        className={fieldMaxHeight == null ? "min-h-[120px] rounded-xl" : "rounded-xl"}
+        style={
+          fieldMaxHeight == null
+            ? undefined
+            : { maxHeight: fieldMaxHeight, minHeight: Math.min(120, fieldMaxHeight) }
+        }
+        autoFocus
+      />
+    </View>
+  );
+}
 
 export function RecipeAiEditSheet({ visible, recipeId, onClose, onApplied }: Props) {
   const [instruction, setInstruction] = useState("");
@@ -46,30 +101,11 @@ export function RecipeAiEditSheet({ visible, recipeId, onClose, onApplied }: Pro
   };
 
   return (
-    <Sheet visible={visible} onClose={handleClose}>
-      <View className="gap-3 pb-2">
-        <View className="flex-row items-center gap-2">
-          <View className="h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
-            <Sparkles size={18} color={colors.green500} />
-          </View>
-          <View className="min-w-0 flex-1">
-            <Text className="font-sans-semibold text-base">Edit with AI</Text>
-            <Text className="text-xs text-muted-foreground">
-              Describe what to change — ingredients, servings, style, etc.
-            </Text>
-          </View>
-        </View>
-
-        <Textarea
-          value={instruction}
-          onChangeText={setInstruction}
-          editable={!saving}
-          placeholder="e.g. Make it dairy-free and cut prep time in half"
-          className="min-h-[120px] rounded-xl"
-          autoFocus
-        />
-
-        <View className="flex-row gap-2 pt-1">
+    <Sheet
+      visible={visible}
+      onClose={handleClose}
+      footer={
+        <View className="flex-row gap-2">
           <Button variant="outline" className="flex-1" disabled={saving} onPress={handleClose}>
             Cancel
           </Button>
@@ -78,7 +114,13 @@ export function RecipeAiEditSheet({ visible, recipeId, onClose, onApplied }: Pro
             {saving ? "Updating…" : "Apply edit"}
           </Button>
         </View>
-      </View>
+      }
+    >
+      <AiEditFields
+        instruction={instruction}
+        onChangeInstruction={setInstruction}
+        saving={saving}
+      />
     </Sheet>
   );
 }

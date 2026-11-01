@@ -27,7 +27,7 @@ import {
   ListTodo
 } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 type Step = "providers" | "reminders";
 
@@ -197,8 +197,20 @@ export function GroceryExportSheet({
     }
   }
 
+  const remindersFooter =
+    step === "reminders" && !listsLoading && !listsError ? (
+      <Button
+        disabled={!selectedListId || exporting}
+        onPress={() => void onPushToReminders()}
+      >
+        {exporting
+          ? "Adding…"
+          : `Add ${exportCount} ${exportCount === 1 ? "item" : "items"}`}
+      </Button>
+    ) : undefined;
+
   return (
-    <Sheet visible={visible} onClose={handleClose}>
+    <Sheet visible={visible} onClose={handleClose} footer={remindersFooter}>
       {step === "providers" ? (
         <View className="gap-1 pb-1">
           <Text className="px-1 pb-1 font-sans-bold text-lg">Export</Text>
@@ -272,53 +284,37 @@ export function GroceryExportSheet({
               </Button>
             </View>
           ) : (
-            <>
-              <ScrollView
-                style={{ maxHeight: 280 }}
-                contentContainerStyle={{ gap: 4 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                {lists.map((list) => {
-                  const selected = list.id === selectedListId;
-                  return (
-                    <Pressable
-                      key={list.id}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected }}
-                      onPress={() => {
-                        tapHaptic();
-                        setSelectedListId(list.id);
-                      }}
-                      className={
-                        selected
-                          ? "flex-row items-center gap-3 rounded-lg border border-[rgba(34,197,94,0.45)] bg-[#22c55e]/10 px-3 py-3"
-                          : "flex-row items-center gap-3 rounded-lg border border-transparent px-3 py-3 active:bg-secondary/60"
-                      }
-                    >
-                      <View className="min-w-0 flex-1">
-                        <Text className="font-sans-medium text-sm">{list.title}</Text>
-                        {list.sourceName ? (
-                          <Text className="mt-0.5 text-xs text-muted-foreground">
-                            {list.sourceName}
-                          </Text>
-                        ) : null}
-                      </View>
-                      {selected ? <Check size={18} color={colors.green500} /> : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-
-              <Button
-                className="mt-1"
-                disabled={!selectedListId || exporting}
-                onPress={() => void onPushToReminders()}
-              >
-                {exporting
-                  ? "Adding…"
-                  : `Add ${exportCount} ${exportCount === 1 ? "item" : "items"}`}
-              </Button>
-            </>
+            <View className="gap-1">
+              {lists.map((list) => {
+                const selected = list.id === selectedListId;
+                return (
+                  <Pressable
+                    key={list.id}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    onPress={() => {
+                      tapHaptic();
+                      setSelectedListId(list.id);
+                    }}
+                    className={
+                      selected
+                        ? "flex-row items-center gap-3 rounded-lg border border-[rgba(34,197,94,0.45)] bg-[#22c55e]/10 px-3 py-3"
+                        : "flex-row items-center gap-3 rounded-lg border border-transparent px-3 py-3 active:bg-secondary/60"
+                    }
+                  >
+                    <View className="min-w-0 flex-1">
+                      <Text className="font-sans-medium text-sm">{list.title}</Text>
+                      {list.sourceName ? (
+                        <Text className="mt-0.5 text-xs text-muted-foreground">
+                          {list.sourceName}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {selected ? <Check size={18} color={colors.green500} /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
           )}
         </View>
       )}

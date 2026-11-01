@@ -509,20 +509,10 @@ export default function GroceryListScreen() {
         </View>
       )}
 
-      <Sheet visible={editingItem !== null} onClose={() => setEditingItem(null)}>
-        <View className="gap-4">
-          <Text className="font-sans-bold text-lg">Edit item</Text>
-          <Input
-            className="bg-card"
-            value={editName}
-            onChangeText={setEditName}
-            placeholder="Item name"
-            autoCapitalize="sentences"
-            returnKeyType="done"
-            onSubmitEditing={onSaveEdit}
-            editable={!updateManual.isPending}
-            autoFocus
-          />
+      <Sheet
+        visible={editingItem !== null}
+        onClose={() => setEditingItem(null)}
+        footer={
           <View className="flex-row gap-2">
             <Button
               variant="outline"
@@ -540,6 +530,21 @@ export default function GroceryListScreen() {
               Save
             </Button>
           </View>
+        }
+      >
+        <View className="gap-4">
+          <Text className="font-sans-bold text-lg">Edit item</Text>
+          <Input
+            className="bg-card"
+            value={editName}
+            onChangeText={setEditName}
+            placeholder="Item name"
+            autoCapitalize="sentences"
+            returnKeyType="done"
+            onSubmitEditing={onSaveEdit}
+            editable={!updateManual.isPending}
+            autoFocus
+          />
         </View>
       </Sheet>
 
