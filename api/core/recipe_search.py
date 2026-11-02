@@ -13,6 +13,7 @@ from sqlmodel import Session, and_, col, or_, select
 
 from api.core.embeddings.client import EmbeddingClient, get_embedding_client
 from api.core.household import get_membership, recipe_access_filter
+from api.core.recipe_versions import head_version_join
 from api.models import Ingredient, Recipe, RecipeVersion, User
 
 logger = logging.getLogger(__name__)
@@ -184,10 +185,6 @@ def _query_tokens(search_text: str) -> list[str]:
     return _TOKEN_RE.findall(search_text.lower())
 
 
-def _current_version_join():
-    return RecipeVersion.id == Recipe.current_version_id
-
-
 def _field_match_clause(like: str) -> Any:
     return or_(
         col(RecipeVersion.name).ilike(like),
@@ -221,7 +218,7 @@ def _lexical_hits(
     match_any = or_(*[_field_match_clause(like) for like in likes])
     query = (
         select(Recipe)
-        .join(RecipeVersion, _current_version_join())
+        .join(RecipeVersion, head_version_join())
         .where(and_(access, match_any))
         .options(
             selectinload(Recipe.current_version).selectinload(

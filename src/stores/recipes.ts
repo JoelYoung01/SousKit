@@ -5,6 +5,20 @@ import { computed, ref } from "vue";
 
 const PAGE_SIZE = 50;
 
+/** Most recently saved version first. Ties break on id so paging stays stable. */
+function byLatestSave(a: RecipeCard, b: RecipeCard): number {
+  const delta = new Date(b.updated_on).getTime() - new Date(a.updated_on).getTime();
+  if (delta !== 0 && !Number.isNaN(delta)) return delta;
+  return b.id - a.id;
+}
+
+/** One card per recipe. A later page wins if the same id shows up twice. */
+function uniqueRecipes(rows: RecipeCard[]): RecipeCard[] {
+  const byId = new Map<number, RecipeCard>();
+  for (const row of rows) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
 export const useRecipesStore = defineStore("recipes", () => {
   const recipes = ref<RecipeCard[]>([]);
   const loading = ref(false);
@@ -16,11 +30,7 @@ export const useRecipesStore = defineStore("recipes", () => {
   let listInflight: Promise<void> | null = null;
   let countInflight: Promise<number> | null = null;
 
-  const sorted = computed(() =>
-    [...recipes.value].sort(
-      (a, b) => new Date(b.created_on).getTime() - new Date(a.created_on).getTime()
-    )
-  );
+  const sorted = computed(() => uniqueRecipes(recipes.value).sort(byLatestSave));
 
   async function fetchCount(force = false): Promise<number> {
     if (!force && count.value !== null) return count.value;

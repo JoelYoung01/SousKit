@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import col, select
 
 from api.core.authentication import CurrentUserDep, verify_access_token
 from api.core.database import SessionDep
@@ -37,15 +37,17 @@ from api.core.recipe_versions import (
 from api.core.recipe_versions import create_recipe as save_new_recipe
 from api.core.recipe_versions import (
     diff_versions,
+    head_version_join,
     list_versions,
     load_version,
     recipe_card_load_options,
     recipe_detail_load_options,
     restore_version,
+    select_recipes_at_head,
     version_detail,
     version_summary,
 )
-from api.models import Recipe
+from api.models import Recipe, RecipeVersion
 from api.schemas import (
     CountResponse,
     RecipeAiEditRequest,
@@ -207,7 +209,7 @@ def get_public_recipes(
     limit: Annotated[int, Query(le=100)] = 100,
 ):
     stmt = (
-        select(Recipe)
+        select_recipes_at_head()
         .where(Recipe.public)
         .options(*_recipe_detail_options())
         .offset(offset)
@@ -230,7 +232,7 @@ def get_all_recipes(
 ):
     household, _ = require_membership(session, current_user)
     recipes = session.exec(
-        select(Recipe)
+        select_recipes_at_head()
         .where(recipe_access_filter(household.id))
         .options(*recipe_card_load_options())
         .offset(offset)
@@ -246,13 +248,17 @@ def get_users_recipes(
     offset: int = 0,
     limit: Annotated[int, Query(le=100)] = 50,
 ):
-    """Recipes in the current user's household (shared library)."""
+    """Household library: one card per recipe, current version only.
+
+    Ordered by the latest save (the head version's timestamp), then id.
+    Older snapshots stay on the history endpoints and are not listed.
+    """
     household, _ = require_membership(session, current_user)
     recipes = session.exec(
-        select(Recipe)
+        select_recipes_at_head()
         .where(Recipe.household_id == household.id)
         .options(*recipe_card_load_options())
-        .order_by(Recipe.created_on.desc())
+        .order_by(col(RecipeVersion.created_on).desc(), col(Recipe.id).desc())
         .offset(offset)
         .limit(limit)
     ).all()
@@ -261,10 +267,12 @@ def get_users_recipes(
 
 @router.get("/user/count/", response_model=CountResponse)
 def get_users_recipe_count(current_user: CurrentUserDep, session: SessionDep):
+    """Count recipe identities in the household, not historical versions."""
     household, _ = require_membership(session, current_user)
     count = session.exec(
         select(func.count())
         .select_from(Recipe)
+        .join(RecipeVersion, head_version_join())
         .where(Recipe.household_id == household.id)
     ).one()
     return CountResponse(count=count)
@@ -272,12 +280,13 @@ def get_users_recipe_count(current_user: CurrentUserDep, session: SessionDep):
 
 @router.get("/user/recent/", response_model=list[RecipeCard])
 def get_users_recently_added_recipes(current_user: CurrentUserDep, session: SessionDep):
+    """Five newest recipe identities, still showing each one's head version."""
     household, _ = require_membership(session, current_user)
     recipes = session.exec(
-        select(Recipe)
+        select_recipes_at_head()
         .where(Recipe.household_id == household.id)
         .options(*recipe_card_load_options())
-        .order_by(Recipe.created_on.desc())
+        .order_by(col(Recipe.created_on).desc(), col(Recipe.id).desc())
         .limit(5)
     ).all()
     return recipes

@@ -62,6 +62,20 @@ def recipe_card_load_options():
     )
 
 
+def head_version_join():
+    """Match a recipe to its current snapshot, never an older history row."""
+    return RecipeVersion.id == Recipe.current_version_id
+
+
+def select_recipes_at_head():
+    """One row per recipe, joined to the head version.
+
+    Callers add access filters, ordering, and load options. Older versions
+    stay in ``recipe_version`` and are not part of this selectable.
+    """
+    return select(Recipe).join(RecipeVersion, head_version_join())
+
+
 def slugify(name: str) -> str:
     slug = _SLUG_RE.sub("-", (name or "").lower()).strip("-")
     slug = slug[:_SLUG_MAX].strip("-")

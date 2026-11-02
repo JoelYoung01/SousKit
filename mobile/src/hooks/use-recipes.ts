@@ -8,11 +8,21 @@ import {
 import type { RecipeCard } from "@/types";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
-function byNewest(a: RecipeCard, b: RecipeCard): number {
-  return new Date(b.created_on).getTime() - new Date(a.created_on).getTime();
+/** Most recently saved version first. Ties break on id so paging stays stable. */
+function byLatestSave(a: RecipeCard, b: RecipeCard): number {
+  const delta = new Date(b.updated_on).getTime() - new Date(a.updated_on).getTime();
+  if (delta !== 0 && !Number.isNaN(delta)) return delta;
+  return b.id - a.id;
 }
 
-/** Paged personal recipe list (newest first), with load-more support. */
+/** One card per recipe. A later page wins if the same id shows up twice. */
+function uniqueRecipes(rows: RecipeCard[]): RecipeCard[] {
+  const byId = new Map<number, RecipeCard>();
+  for (const row of rows) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
+/** Paged personal recipe list (latest save first), with load-more support. */
 export function useRecipeList() {
   return useInfiniteQuery({
     queryKey: ["recipes", "list"],
@@ -22,7 +32,7 @@ export function useRecipeList() {
       lastPage.length >= RECIPE_PAGE_SIZE
         ? allPages.reduce((n, page) => n + page.length, 0)
         : undefined,
-    select: (data) => [...data.pages.flat()].sort(byNewest)
+    select: (data) => uniqueRecipes(data.pages.flat()).sort(byLatestSave)
   });
 }
 
