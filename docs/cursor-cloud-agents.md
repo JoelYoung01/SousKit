@@ -71,6 +71,7 @@ The admin seed also receives `SUPERUSER_GID` when set.
 - A recipe row is identity and metadata: `id`, `slug`, owner, household, `public`, and `current_version_id`.
 - Cooked content (name, description, instructions, notes, prep time, cover, ingredients) lives on append-only `recipe_version` rows. Saving, AI edit, import, and restore each append a version and move the head forward. Identical content does not create a new row. Toggling `public` does not.
 - `GET /api/recipe/{id}/` and `GET /api/recipe/slug/{slug}/` return the head version flattened into the usual recipe payload (`head_version_number`, `updated_on`, `slug` included).
+- `GET /api/recipe/user/` (the recipes library) joins each recipe to its current version only and orders by that version's timestamp, newest save first. Older snapshots are not listed. `GET /api/recipe/user/count/` counts recipe identities, not versions. `GET /api/recipe/user/recent/` is the five newest identities by `created_on`, still showing the head.
 - History: `GET /api/recipe/{id}/versions/`, `GET /api/recipe/{id}/versions/{n}/`, `GET /api/recipe/{id}/versions/diff/?from=&to=`, `POST /api/recipe/{id}/versions/{n}/restore/`.
 - Create/update accept an `ingredients` array so one save is one version. The `/ingredient/` routes still work and each call appends its own version.
 

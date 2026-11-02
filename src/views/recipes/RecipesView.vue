@@ -39,8 +39,13 @@ const deleteOpen = ref(false);
 const deleting = ref(false);
 
 const displayList = computed(() => {
-  // Preserve API relevance order for search; library browse stays newest-first.
-  if (searchResults.value) return searchResults.value;
+  // Search keeps API relevance order. The library is one card per recipe,
+  // most recently saved version first.
+  if (searchResults.value) {
+    const byId = new Map<number, RecipeCardType>();
+    for (const row of searchResults.value) byId.set(row.id, row);
+    return [...byId.values()];
+  }
   return recipesStore.sorted;
 });
 

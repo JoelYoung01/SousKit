@@ -30,9 +30,12 @@ export default function RecipesScreen() {
   }, [search.isError, search.error]);
 
   const data: RecipeCardType[] = useMemo(() => {
-    // Preserve API relevance order for search; library browse stays newest-first.
-    if (isSearching) return search.data ?? [];
-    return list.data ?? [];
+    // Search keeps API relevance order. The library is one card per recipe,
+    // most recently saved version first.
+    const rows = isSearching ? (search.data ?? []) : (list.data ?? []);
+    const byId = new Map<number, RecipeCardType>();
+    for (const row of rows) byId.set(row.id, row);
+    return [...byId.values()];
   }, [isSearching, search.data, list.data]);
 
   const showSkeleton = isSearching

@@ -22,7 +22,7 @@ Layout: `layouts/AppShell.vue` (tab bar + add sheet). Children render in the she
 |------|------|------|-----|-------|
 | `/` | — | — | — | Redirect → `/home` |
 | `/home` | `home` | `views/HomeView.vue` | Home | Tonight hero, week strip, 2×2 action cards (Create · Import · Find · Grocery) |
-| `/recipes` | `recipes` | `views/recipes/RecipesView.vue` | Recipes | Results start at top; search is a bottom-right FAB that expands full-width and sticks above the keyboard; hybrid semantic + keyword search; swipe a row left to delete (owned), right to schedule (next open night preselected) |
+| `/recipes` | `recipes` | `views/recipes/RecipesView.vue` | Recipes | One card per recipe, at its latest saved version, most recently saved first. Search is a bottom-right FAB that expands full-width and sticks above the keyboard; hybrid semantic + keyword search over the head version; swipe a row left to delete (owned), right to schedule (next open night preselected) |
 | `/planner` | `planner` | `views/planner/PlannerView.vue` | Planner | Sliding week calendar; empty night opens recipe search + Create wizard CTA; filled night opens recipe detail; swipe left on a filled night to unplan |
 | `/planner/fill` | `planner-fill` | `views/planner/MealPlanWizardView.vue` | Planner | Fill-gaps / plan-week LLM wizard; `?mode=recipe` = Create flow (single recipe, optional day assign at the end) |
 | `/list` | `list` | `views/list/ShoppingListView.vue` | Grocery | Auto grocery list from planned meals (configurable window; defaults to furthest planned meal); tap a row to cross off (2s undo), then it hides; swipe left for view/delete |
