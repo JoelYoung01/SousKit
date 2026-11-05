@@ -14,6 +14,7 @@ export type RecipeMarkdownSource = {
   ingredients: IngredientLike[];
   instructions: string;
   notes?: string | null;
+  source_links?: { name: string; url: string }[] | null;
 };
 
 function formatIngredientLine(ingredient: IngredientLike): string {
@@ -74,6 +75,15 @@ export function recipeToMarkdown(recipe: RecipeMarkdownSource): string {
   const notes = recipe.notes?.trim();
   if (notes) {
     lines.push("", "## Notes", "", notes);
+  }
+
+  const sources = (recipe.source_links ?? []).filter((link) => link.url.trim());
+  if (sources.length) {
+    lines.push("", "## Sources", "");
+    for (const link of sources) {
+      const label = link.name.trim() || link.url;
+      lines.push(`- [${label}](${link.url})`);
+    }
   }
 
   return lines.join("\n").trimEnd();

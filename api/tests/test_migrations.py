@@ -63,12 +63,15 @@ class AlembicHeadTests(unittest.TestCase):
                 rows = connection.exec_driver_sql(
                     "SELECT version_num FROM alembic_version"
                 ).fetchall()
-                names = set(inspect(connection).get_table_names())
-                indexes = {
-                    index["name"] for index in inspect(connection).get_indexes("token")
+                inspected = inspect(connection)
+                names = set(inspected.get_table_names())
+                indexes = {index["name"] for index in inspected.get_indexes("token")}
+                version_columns = {
+                    column["name"] for column in inspected.get_columns("recipe_version")
                 }
             self.assertEqual([row[0] for row in rows], [head_revision()])
             self.assertIn("recipe_version", names)
+            self.assertIn("source_links_json", version_columns)
             self.assertIn("passkey", names)
             self.assertIn("webauthnchallenge", names)
             self.assertIn("ix_token_access_token", indexes)

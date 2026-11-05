@@ -19,6 +19,7 @@ import { paths } from "@/sitemap";
 import type { RecipeDetail, RecipeVersionDetail } from "@/types";
 import RecipeHistoryDialog from "@/components/recipes/RecipeHistoryDialog.vue";
 import ScheduleRecipeDialog from "@/components/recipes/ScheduleRecipeDialog.vue";
+import SourceLinkChips from "@/components/recipes/SourceLinkChips.vue";
 import {
   formatIngredientAmountUnits,
   ingredientHasAmountOrUnits,
@@ -72,6 +73,7 @@ const shown = computed(() => {
     instructions: preview.value.instructions,
     notes: preview.value.notes ?? undefined,
     prep_time: preview.value.prep_time ?? undefined,
+    source_links: preview.value.source_links ?? [],
     cover_image: preview.value.cover_image ?? undefined,
     cover_image_id: preview.value.cover_image_id ?? undefined,
     ingredients: preview.value.ingredients
@@ -298,6 +300,11 @@ onMounted(async () => {
         <p v-if="recipe.public && owned" class="mt-2 text-xs text-[#4ade80]">
           This recipe is public.
         </p>
+      </section>
+
+      <section v-if="shown.source_links?.length" class="mt-4">
+        <h2 class="mb-2 text-sm font-semibold">Sources</h2>
+        <SourceLinkChips :links="shown.source_links" />
       </section>
 
       <section class="mt-5">

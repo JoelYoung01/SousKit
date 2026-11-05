@@ -25,27 +25,34 @@ class ImportedRecipeDraft:
     prep_time: float | None
     ingredients: list[dict[str, Any]] = field(default_factory=list)
     source_url: str = ""
+    source_links: list[dict[str, str]] = field(default_factory=list)
     method: str = "schema"  # schema | llm
 
 
-def _to_draft(data: dict[str, Any], *, source_url: str) -> ImportedRecipeDraft:
+def _to_draft(
+    data: dict[str, Any],
+    *,
+    source_url: str,
+    html: str = "",
+) -> ImportedRecipeDraft:
+    # Imported lazily: source_links imports this package's fetch module.
+    from api.core.source_links import hostname_label, site_name_from_html
+
     notes = data.get("notes")
-    source_line = f"Imported from {source_url}"
-    if notes:
-        notes_str = str(notes).strip()
-        if source_url not in notes_str:
-            notes_str = f"{notes_str}\n\n{source_line}"
-    else:
-        notes_str = source_line
+    notes_str = str(notes).strip() if notes else None
+    site_name = (
+        site_name_from_html(html, source_url) if html else hostname_label(source_url)
+    )
 
     return ImportedRecipeDraft(
         name=str(data["name"]).strip(),
         description=str(data["description"]).strip(),
         instructions=str(data["instructions"]).strip(),
-        notes=notes_str,
+        notes=notes_str or None,
         prep_time=data.get("prep_time"),
         ingredients=list(data.get("ingredients") or []),
         source_url=source_url,
+        source_links=[{"name": site_name, "url": source_url}],
         method=str(data.get("method") or "schema"),
     )
 
@@ -76,7 +83,7 @@ async def import_recipe_from_url(
             page_url,
             len(scraped.get("ingredients") or []),
         )
-        return _to_draft(scraped, source_url=page_url)
+        return _to_draft(scraped, source_url=page_url, html=page_html)
 
     llm_data = await extract_recipe_with_llm(html=page_html, page_url=page_url, llm=llm)
     if llm_data:
@@ -85,7 +92,7 @@ async def import_recipe_from_url(
             page_url,
             len(llm_data.get("ingredients") or []),
         )
-        return _to_draft(llm_data, source_url=page_url)
+        return _to_draft(llm_data, source_url=page_url, html=page_html)
 
     raise RecipeImportError(
         "We couldn’t find a recipe on that page. "
