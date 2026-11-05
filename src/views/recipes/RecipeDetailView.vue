@@ -18,6 +18,7 @@ import { syncAfterRecipeMutation } from "@/stores/sync";
 import { paths } from "@/sitemap";
 import type { RecipeDetail, RecipeVersionDetail } from "@/types";
 import RecipeHistoryDialog from "@/components/recipes/RecipeHistoryDialog.vue";
+import ScheduleRecipeDialog from "@/components/recipes/ScheduleRecipeDialog.vue";
 import {
   formatIngredientAmountUnits,
   ingredientHasAmountOrUnits,
@@ -42,6 +43,7 @@ const aiEditOpen = ref(false);
 const aiInstruction = ref("");
 const aiSaving = ref(false);
 const copying = ref(false);
+const planOpen = ref(false);
 const loading = ref(false);
 const householdId = ref<number | null>(null);
 
@@ -180,10 +182,6 @@ async function applyAiEdit() {
   aiSaving.value = false;
 }
 
-function scrollToIngredients() {
-  document.getElementById("ingredients")?.scrollIntoView({ behavior: "smooth" });
-}
-
 onMounted(async () => {
   try {
     householdId.value = (await fetchHousehold()).id;
@@ -251,7 +249,7 @@ onMounted(async () => {
             Version {{ preview?.version_number ?? recipe.head_version_number }} · History
           </button>
         </div>
-        <Button size="sm" class="shrink-0" @click="scrollToIngredients">Cook</Button>
+        <Button size="sm" class="shrink-0" @click="planOpen = true">Plan</Button>
       </div>
 
       <div
@@ -302,7 +300,7 @@ onMounted(async () => {
         </p>
       </section>
 
-      <section id="ingredients" class="mt-5 scroll-mt-4">
+      <section class="mt-5">
         <h2 class="mb-2 text-sm font-semibold">Ingredients</h2>
         <ul class="space-y-1.5 text-base">
           <li
@@ -349,6 +347,8 @@ onMounted(async () => {
         </Button>
       </div>
     </div>
+
+    <ScheduleRecipeDialog v-model:open="planOpen" :recipe="shown" replace-existing />
 
     <RecipeHistoryDialog
       v-model:open="historyOpen"
