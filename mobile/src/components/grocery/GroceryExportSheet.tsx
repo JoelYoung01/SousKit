@@ -85,10 +85,13 @@ function ProviderRow({
 export function GroceryExportSheet({
   visible,
   onClose,
+  onActivity,
   items
 }: {
   visible: boolean;
   onClose: () => void;
+  /** Any touch inside the sheet, so a grocery check-off can wait. */
+  onActivity?: () => void;
   items: GroceryItem[];
 }) {
   const remindersAvailable = isRemindersExportAvailable();
@@ -209,7 +212,7 @@ export function GroceryExportSheet({
     ) : undefined;
 
   return (
-    <Sheet visible={visible} onClose={handleClose} footer={remindersFooter}>
+    <Sheet visible={visible} onClose={handleClose} onActivity={onActivity} footer={remindersFooter}>
       {step === "providers" ? (
         <View className="gap-1 pb-1">
           <Text className="px-1 pb-1 font-sans-bold text-lg">Export</Text>
