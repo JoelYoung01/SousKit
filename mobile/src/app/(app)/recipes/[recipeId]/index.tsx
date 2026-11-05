@@ -187,8 +187,7 @@ export default function RecipeDetailScreen() {
           </View>
         </View>
 
-        {/* Body card */}
-        <View className="-mt-4 rounded-t-2xl border border-t-0 border-border bg-card px-5 pb-8 pt-5">
+        <View className="bg-background px-5 pb-8 pt-5">
           {recipe ? (
             <>
               <View className="flex-row items-start justify-between gap-3">
