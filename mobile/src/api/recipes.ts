@@ -6,6 +6,7 @@ import type {
   RecipeCreate,
   RecipeCoverGenerateResponse,
   RecipeDetail,
+  RecipeSourceLink,
   RecipeVersionDetail,
   RecipeVersionDiff,
   RecipeVersionSummary
@@ -67,6 +68,11 @@ export function createRecipe(body: RecipeCreate): Promise<RecipeDetail> {
 /** Fetch a recipe website URL, extract structured data, and save a private recipe. */
 export function importRecipeFromUrl(url: string): Promise<RecipeDetail> {
   return post<RecipeDetail>("/recipe/import-from-url/", { url });
+}
+
+/** Read a page and return the website name to show on a source chip. */
+export function resolveSourceLink(url: string): Promise<RecipeSourceLink> {
+  return post<RecipeSourceLink>("/recipe/source-links/resolve/", { url });
 }
 
 export function updateRecipe(

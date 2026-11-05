@@ -1,4 +1,6 @@
+import re
 from datetime import datetime
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -166,6 +168,27 @@ class RecipeCoverGenerateResponse(BaseModel):
     options: list[RecipeCoverOption]
 
 
+def _coerce_source_link_input(value: Any) -> Any:
+    """Accept a list of links or a comma-separated string of URLs."""
+    if not isinstance(value, str):
+        return value
+    parts = [part.strip() for part in re.split(r"[\n,]+", value) if part.strip()]
+    return [{"name": "", "url": part} for part in parts]
+
+
+class RecipeSourceLink(BaseModel):
+    """Chip label (``name``) and the URL it opens. Order is the saved order."""
+
+    name: str = ""
+    url: str
+
+
+class RecipeSourceLinkResolveRequest(BaseModel):
+    """Look up a display name for a URL the editor is about to save."""
+
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class RecipeSlim(BaseModel):
     id: int
     slug: str
@@ -181,6 +204,7 @@ class RecipeSlim(BaseModel):
     prep_time: float | None = None
     cover_image_id: int | None = None
     head_version_number: int
+    source_links: list[RecipeSourceLink] = Field(default_factory=list)
 
     @field_validator("instructions")
     @classmethod
@@ -238,11 +262,17 @@ class RecipeCreate(BaseModel):
     prep_time: float | None = None
     cover_image_id: int | None = None
     ingredients: list[IngredientWrite] = Field(default_factory=list)
+    source_links: list[RecipeSourceLink] = Field(default_factory=list)
 
     @field_validator("instructions")
     @classmethod
     def _normalize_instructions(cls, value: str) -> str:
         return normalize_instruction_newlines(value)
+
+    @field_validator("source_links", mode="before")
+    @classmethod
+    def _coerce_source_links(cls, value: Any) -> Any:
+        return _coerce_source_link_input(value)
 
 
 class RecipeImportFromUrlRequest(BaseModel):
@@ -267,6 +297,13 @@ class RecipeUpdate(BaseModel):
     cover_image_id: int | None = None
     # When set, replaces the head ingredient list on the new version.
     ingredients: list[IngredientWrite] | None = None
+    # When set, replaces the saved source links. Omit to leave them unchanged.
+    source_links: list[RecipeSourceLink] | None = None
+
+    @field_validator("source_links", mode="before")
+    @classmethod
+    def _coerce_source_links(cls, value: Any) -> Any:
+        return _coerce_source_link_input(value)
 
     @field_validator("instructions")
     @classmethod
@@ -295,6 +332,7 @@ class RecipeVersionDetail(RecipeVersionSummary):
     cover_image_id: int | None = None
     cover_image: UploadFileResponse | None = None
     ingredients: list["IngredientSlim"]
+    source_links: list[RecipeSourceLink] = Field(default_factory=list)
 
     @field_validator("instructions")
     @classmethod

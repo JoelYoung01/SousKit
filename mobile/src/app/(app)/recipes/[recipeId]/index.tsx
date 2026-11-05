@@ -1,6 +1,7 @@
 import { deleteRecipe, restoreRecipeVersion } from "@/api/recipes";
 import { EmptyState } from "@/components/EmptyState";
 import { RecipeAiEditSheet } from "@/components/RecipeAiEditSheet";
+import { SourceLinkChips } from "@/components/SourceLinkChips";
 import { RecipeHistorySheet } from "@/components/RecipeHistorySheet";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -62,6 +63,7 @@ export default function RecipeDetailScreen() {
           instructions: preview.instructions,
           notes: preview.notes ?? undefined,
           prep_time: preview.prep_time ?? undefined,
+          source_links: preview.source_links ?? [],
           cover_image: preview.cover_image ?? undefined,
           ingredients: preview.ingredients
         }
@@ -267,6 +269,13 @@ export default function RecipeDetailScreen() {
                   <Text className="text-base leading-6 text-muted-foreground">
                     {shown.description}
                   </Text>
+                </View>
+              ) : null}
+
+              {shown?.source_links?.length ? (
+                <View className="mt-4">
+                  <Text className="mb-2 font-sans-semibold text-sm">Sources</Text>
+                  <SourceLinkChips links={shown.source_links} />
                 </View>
               ) : null}
 

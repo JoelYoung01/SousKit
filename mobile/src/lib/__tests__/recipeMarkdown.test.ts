@@ -11,7 +11,8 @@ describe("recipeToMarkdown", () => {
         { name: "garlic", amount: 4, units: "cloves", details: "minced" }
       ],
       instructions: "1. Boil pasta.\n\n2. Saute garlic.\n3. Toss and serve.",
-      notes: "Add chili flakes if you like heat."
+      notes: "Add chili flakes if you like heat.",
+      source_links: [{ name: "Serious Eats", url: "https://www.seriouseats.com/garlic-pasta" }]
     });
 
     expect(markdown).toBe(
@@ -37,7 +38,11 @@ describe("recipeToMarkdown", () => {
         "",
         "## Notes",
         "",
-        "Add chili flakes if you like heat."
+        "Add chili flakes if you like heat.",
+        "",
+        "## Sources",
+        "",
+        "- [Serious Eats](https://www.seriouseats.com/garlic-pasta)"
       ].join("\n")
     );
   });

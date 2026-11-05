@@ -22,7 +22,15 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Session, col, select
 
 from api.core.recipe_text import normalize_instruction_newlines
+from api.core.source_links import (
+    dump_source_links,
+    format_source_links,
+    load_source_links,
+    normalize_source_links,
+)
 from api.models import Ingredient, Recipe, RecipeVersion
+
+_KEEP_LINKS = object()
 
 CHANGE_CREATE = "create"
 CHANGE_EDIT = "edit"
@@ -46,6 +54,7 @@ class RecipeContent:
     notes: str | None
     prep_time: float | None
     cover_image_id: int | None
+    source_links: list[dict[str, str]]
 
 
 def recipe_detail_load_options():
@@ -144,6 +153,7 @@ def _content_from_parts(
     notes: str | None,
     prep_time: float | None,
     cover_image_id: int | None,
+    source_links: list[dict[str, Any]] | None = None,
 ) -> RecipeContent:
     return RecipeContent(
         name=(name or "").strip()[:200],
@@ -152,6 +162,7 @@ def _content_from_parts(
         notes=_blank_none(notes),
         prep_time=_prep(prep_time),
         cover_image_id=cover_image_id,
+        source_links=normalize_source_links(source_links),
     )
 
 
@@ -163,6 +174,7 @@ def content_from_version(version: RecipeVersion) -> RecipeContent:
         notes=version.notes,
         prep_time=version.prep_time,
         cover_image_id=version.cover_image_id,
+        source_links=load_source_links(version.source_links_json),
     )
 
 
@@ -194,6 +206,7 @@ def _fingerprint(
         content.notes,
         content.prep_time,
         content.cover_image_id,
+        tuple((link["name"], link["url"]) for link in content.source_links),
         ing_tuples,
     )
 
@@ -274,6 +287,7 @@ def create_recipe(
     prep_time: float | None,
     cover_image_id: int | None,
     ingredients: list[dict[str, Any]] | None,
+    source_links: list[dict[str, Any]] | None = None,
     change_kind: str = CHANGE_CREATE,
     created_on: datetime | None = None,
 ) -> Recipe:
@@ -286,6 +300,7 @@ def create_recipe(
         notes=notes,
         prep_time=prep_time,
         cover_image_id=cover_image_id,
+        source_links=source_links,
     )
     recipe = Recipe(
         slug=allocate_slug(session, content.name or name),
@@ -309,6 +324,7 @@ def create_recipe(
         notes=content.notes,
         prep_time=content.prep_time,
         cover_image_id=content.cover_image_id,
+        source_links_json=dump_source_links(content.source_links),
         change_kind=change_kind,
         restored_from_version=None,
     )
@@ -340,6 +356,7 @@ def append_version(
     cover_image_id: int | None,
     ingredients: list[dict[str, Any]] | None,
     change_kind: str,
+    source_links: Any = _KEEP_LINKS,
     restored_from_version: int | None = None,
 ) -> Recipe:
     """Append a snapshot and move the head forward.
@@ -348,6 +365,11 @@ def append_version(
     When the snapshot matches the head, the history is left unchanged.
     """
     head = require_current_version(session, recipe)
+    links = (
+        load_source_links(head.source_links_json)
+        if source_links is _KEEP_LINKS
+        else source_links
+    )
     content = _content_from_parts(
         name=name,
         description=description,
@@ -355,6 +377,7 @@ def append_version(
         notes=notes,
         prep_time=prep_time,
         cover_image_id=cover_image_id,
+        source_links=links,
     )
     rows = (
         normalize_ingredients(ingredients)
@@ -376,6 +399,7 @@ def append_version(
         notes=content.notes,
         prep_time=content.prep_time,
         cover_image_id=content.cover_image_id,
+        source_links_json=dump_source_links(content.source_links),
         change_kind=change_kind,
         restored_from_version=restored_from_version,
     )
@@ -410,6 +434,7 @@ def apply_recipe_update(
         "notes",
         "prep_time",
         "cover_image_id",
+        "source_links",
     }
     changing_content = content_keys.intersection(patch) or "ingredients" in patch
     if changing_content:
@@ -430,6 +455,9 @@ def apply_recipe_update(
                 else current.cover_image_id
             ),
             ingredients=ingredients,
+            source_links=(
+                patch["source_links"] if "source_links" in patch else _KEEP_LINKS
+            ),
             change_kind=CHANGE_EDIT,
         )
         recipe = _reload(session, recipe.id)
@@ -494,6 +522,7 @@ def restore_version(
         prep_time=content.prep_time,
         cover_image_id=content.cover_image_id,
         ingredients=_ingredient_rows_from_version(source),
+        source_links=content.source_links,
         change_kind=CHANGE_RESTORE,
         restored_from_version=source.version_number,
     )
@@ -608,6 +637,11 @@ def diff_versions(
             before_content.cover_image_id,
             after_content.cover_image_id,
         )
+    add_field(
+        "source_links",
+        format_source_links(before_content.source_links),
+        format_source_links(after_content.source_links),
+    )
     if before_content.instructions != after_content.instructions:
         add_field(
             "instructions",
@@ -656,6 +690,7 @@ def version_detail(version: RecipeVersion, *, is_current: bool) -> dict[str, Any
             "cover_image_id": version.cover_image_id,
             "cover_image": version.cover_image,
             "ingredients": list(version.ingredients or []),
+            "source_links": load_source_links(version.source_links_json),
         }
     )
     return payload

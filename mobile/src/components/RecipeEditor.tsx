@@ -3,6 +3,7 @@ import { uploadImage, type PickedImage } from "@/api/uploads";
 import { getErrorMessage } from "@/api/errors";
 import { del } from "@/api/client";
 import { CoverImagePickerSheet } from "@/components/CoverImagePickerSheet";
+import { SourceLinkEditor } from "@/components/SourceLinkEditor";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,7 @@ import { normalizeCoverOption, normalizeUpload } from "@/lib/coverMedia";
 import { tapHaptic } from "@/lib/haptics";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
-import type { RecipeCoverOption, RecipeDetail, UploadSlim } from "@/types";
+import type { RecipeCoverOption, RecipeDetail, RecipeSourceLink, UploadSlim } from "@/types";
 import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -73,6 +74,7 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [notes, setNotes] = useState("");
+  const [sourceLinks, setSourceLinks] = useState<RecipeSourceLink[]>([]);
   const [prepTime, setPrepTime] = useState("");
   const [isPublic, setIsPublic] = useState(false);
   const [coverImageId, setCoverImageId] = useState<number | null>(null);
@@ -113,6 +115,7 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
         setDescription(r.description);
         setInstructions(r.instructions);
         setNotes(r.notes ?? "");
+        setSourceLinks(r.source_links ?? []);
         setPrepTime(r.prep_time !== undefined && r.prep_time !== null ? String(r.prep_time) : "");
         setIsPublic(r.public);
         setCoverImageId(r.cover_image?.id ?? null);
@@ -357,6 +360,7 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
         description: description.trim(),
         instructions: instructions.trim(),
         notes: notes.trim() || null,
+        source_links: sourceLinks,
         public: isPublic,
         prep_time: prepTime.trim() ? Number(prepTime) : null,
         cover_image_id: coverImageId,
@@ -454,6 +458,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
           <Label>Notes</Label>
           <Textarea value={notes} onChangeText={setNotes} className="min-h-20 rounded-xl" />
         </View>
+
+        <SourceLinkEditor links={sourceLinks} onChange={setSourceLinks} />
 
         <View className="gap-2">
           <Label>Prep time (min)</Label>
