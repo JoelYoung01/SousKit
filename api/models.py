@@ -282,6 +282,8 @@ class Ingredient(BaseIndexedDbModel, table=True):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    # Section label from the source card, such as "Pho Soup Broth".
+    group_name: str | None = None
     recipe_version_id: int = Field(foreign_key="recipe_version.id", index=True)
 
     recipe_version: "RecipeVersion" = Relationship(back_populates="ingredients")

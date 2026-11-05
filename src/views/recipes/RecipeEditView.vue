@@ -135,7 +135,8 @@ const draft = computed<RecipeDraftPayload>(() => ({
       name: asText(row.name),
       amount: asAmount(row.amount),
       units: asOptionalText(row.units),
-      details: asOptionalText(row.details)
+      details: asOptionalText(row.details),
+      group_name: asOptionalText(row.group_name)
     }))
     .filter((row) => row.name.length > 0)
 }));
@@ -338,13 +339,30 @@ function fillForms() {
       name: ingredient.name,
       amount: ingredient.amount,
       units: ingredient.units,
-      details: ingredient.details
+      details: ingredient.details,
+      group_name: ingredient.group_name
     });
   }
 }
 
 function addIngredient() {
-  ingredientForms.push({ ...defaultIngredient });
+  const previous = ingredientForms.at(-1);
+  ingredientForms.push({ ...defaultIngredient, group_name: previous?.group_name });
+}
+
+function showsGroupField(index: number) {
+  const group = ingredientForms[index]?.group_name?.trim();
+  if (!group) return false;
+  if (index === 0) return true;
+  return group !== (ingredientForms[index - 1]?.group_name || "").trim();
+}
+
+function updateGroup(index: number, value: string) {
+  const current = ingredientForms[index]?.group_name ?? "";
+  for (let cursor = index; cursor < ingredientForms.length; cursor += 1) {
+    if (cursor !== index && (ingredientForms[cursor]?.group_name ?? "") !== current) break;
+    ingredientForms[cursor].group_name = value;
+  }
 }
 
 function removeIngredient(index: number) {
@@ -480,35 +498,44 @@ watch(coverRecipeKey, (key) => {
         </Button>
       </div>
 
-      <div
-        v-for="(ingredient, index) in ingredientForms"
-        :key="index"
-        class="grid grid-cols-[1fr_4.5rem_4rem_1fr_auto] gap-1.5"
-      >
+      <div v-for="(ingredient, index) in ingredientForms" :key="index" class="space-y-1.5">
         <Input
-          v-model="ingredient.name"
-          placeholder="Name"
-          class="h-9 rounded-lg bg-card text-xs"
+          v-if="showsGroupField(index)"
+          :model-value="ingredient.group_name || ''"
+          class="h-8 rounded-lg bg-card text-xs font-semibold"
+          @update:model-value="updateGroup(index, String($event ?? ''))"
         />
-        <Input
-          v-model.number="ingredient.amount"
-          type="number"
-          placeholder="Amt"
-          class="h-9 rounded-lg bg-card text-xs"
-        />
-        <Input
-          v-model="ingredient.units"
-          placeholder="Unit"
-          class="h-9 rounded-lg bg-card text-xs"
-        />
-        <Input
-          v-model="ingredient.details"
-          placeholder="Details"
-          class="h-9 rounded-lg bg-card text-xs"
-        />
-        <Button type="button" size="icon-sm" variant="destructive" @click="removeIngredient(index)">
-          <Trash2 class="size-3.5" />
-        </Button>
+        <div class="grid grid-cols-[1fr_4.5rem_4rem_1fr_auto] gap-1.5">
+          <Input
+            v-model="ingredient.name"
+            placeholder="Name"
+            class="h-9 rounded-lg bg-card text-xs"
+          />
+          <Input
+            v-model.number="ingredient.amount"
+            type="number"
+            placeholder="Amt"
+            class="h-9 rounded-lg bg-card text-xs"
+          />
+          <Input
+            v-model="ingredient.units"
+            placeholder="Unit"
+            class="h-9 rounded-lg bg-card text-xs"
+          />
+          <Input
+            v-model="ingredient.details"
+            placeholder="Details"
+            class="h-9 rounded-lg bg-card text-xs"
+          />
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="destructive"
+            @click="removeIngredient(index)"
+          >
+            <Trash2 class="size-3.5" />
+          </Button>
+        </div>
       </div>
     </form>
 

@@ -22,6 +22,7 @@ import ScheduleRecipeDialog from "@/components/recipes/ScheduleRecipeDialog.vue"
 import SourceLinkChips from "@/components/recipes/SourceLinkChips.vue";
 import {
   formatIngredientAmountUnits,
+  ingredientGroupHeading,
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails
 } from "@/utils/ingredients";
@@ -82,14 +83,16 @@ const shown = computed(() => {
 const imageUrl = computed(() => mediaUrl(shown.value?.cover_image?.url));
 const formattedTime = computed(() => formatPrepTime(shown.value?.prep_time) || "—");
 const canAiSave = computed(() => aiInstruction.value.trim().length > 0 && !aiSaving.value);
-const displayedIngredients = computed(() =>
-  (shown.value?.ingredients ?? []).map((ingredient) => ({
+const displayedIngredients = computed(() => {
+  const rows = shown.value?.ingredients ?? [];
+  return rows.map((ingredient, index) => ({
     ...ingredient,
     amountUnits: formatIngredientAmountUnits(ingredient.amount, ingredient.units),
     hasAmountUnits: ingredientHasAmountOrUnits(ingredient.amount, ingredient.units),
-    detailsText: normalizeIngredientDetails(ingredient.details)
-  }))
-);
+    detailsText: normalizeIngredientDetails(ingredient.details),
+    groupHeading: ingredientGroupHeading(rows, index)
+  }));
+});
 
 watch(aiEditOpen, (open) => {
   if (open) {
@@ -308,20 +311,21 @@ onMounted(async () => {
       <section class="mt-5">
         <h2 class="mb-2 text-sm font-semibold">Ingredients</h2>
         <ul class="space-y-1.5 text-base">
-          <li
-            v-for="ingredient in displayedIngredients"
-            :key="ingredient.id"
-            class="rounded-lg bg-secondary/40 px-3 py-2"
-          >
-            <span v-if="ingredient.hasAmountUnits" class="text-muted-foreground">
-              {{ ingredient.amountUnits }}
-            </span>
-            <template v-if="ingredient.hasAmountUnits"> • </template>
-            {{ ingredient.name }}
-            <span v-if="ingredient.detailsText" class="text-faint">
-              ({{ ingredient.detailsText }})
-            </span>
-          </li>
+          <template v-for="ingredient in displayedIngredients" :key="ingredient.id">
+            <li v-if="ingredient.groupHeading" class="px-1 pt-3 text-sm font-semibold first:pt-0">
+              {{ ingredient.groupHeading }}
+            </li>
+            <li class="rounded-lg bg-secondary/40 px-3 py-2">
+              <span v-if="ingredient.hasAmountUnits" class="text-muted-foreground">
+                {{ ingredient.amountUnits }}
+              </span>
+              <template v-if="ingredient.hasAmountUnits"> • </template>
+              {{ ingredient.name }}
+              <span v-if="ingredient.detailsText" class="text-faint">
+                ({{ ingredient.detailsText }})
+              </span>
+            </li>
+          </template>
         </ul>
       </section>
 

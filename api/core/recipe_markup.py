@@ -236,12 +236,25 @@ class _HtmlMarkdownParser(HTMLParser):
 
 
 def _normalize_plain(text: str) -> str:
+    text = (
+        text.replace("\u2010", "-")
+        .replace("\u2011", "-")
+        .replace("\u2012", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2212", "-")
+    )
+    text = text.replace(":", " ")
     text = re.sub(r"(?m)^#{1,6}\s*", "", text)
     text = re.sub(r"(?m)^\s*\d+[.)]\s+", "", text)
     text = re.sub(r"(?m)^\s*[-*+]\s+", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"[*_`]+", "", text)
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _clean_heading(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().rstrip(":").strip()
 
 
 def _compatible(rich: str, plain: str) -> bool:
@@ -317,7 +330,7 @@ def schema_instructions_to_markdown(raw: Any) -> str:
         name = node.get("name")
         children = node.get("itemListElement")
         if kind == "HowToSection":
-            heading = html_to_markdown(str(name or "")).strip()
+            heading = _clean_heading(html_to_markdown(str(name or "")))
             if heading:
                 if lines and lines[-1] != "":
                     lines.append("")
@@ -327,7 +340,7 @@ def schema_instructions_to_markdown(raw: Any) -> str:
                 walk(item)
             return
         if children:
-            heading = html_to_markdown(str(name or "")).strip() if name else ""
+            heading = _clean_heading(html_to_markdown(str(name))) if name else ""
             if heading:
                 if lines and lines[-1] != "":
                     lines.append("")
@@ -408,14 +421,19 @@ def _wprm_groups(soup: BeautifulSoup) -> str | None:
     number = 0
     found = False
     for group in groups:
-        title_el = group.select_one(".wprm-recipe-instruction-group-title")
+        title_el = group.select_one(
+            ".wprm-recipe-instruction-group-name, "
+            ".wprm-recipe-instruction-group-title"
+        )
+        title = ""
         if title_el is not None:
-            title = _element_markdown(title_el)
-            if title:
-                if lines and lines[-1] != "":
-                    lines.append("")
-                lines.append(f"## {title}")
+            title = _clean_heading(_element_markdown(title_el))
+        if title:
+            number = 0
+            if lines and lines[-1] != "":
                 lines.append("")
+            lines.append(f"## {title}")
+            lines.append("")
         for step in group.select(".wprm-recipe-instruction-text"):
             text = _element_markdown(step)
             if not text:
@@ -443,7 +461,7 @@ def _html_notes(soup: BeautifulSoup) -> str | None:
             r"^#{1,3}\s+notes\s*\n+", "", text, count=1, flags=re.IGNORECASE
         ).strip()
         if text:
-            return text[:4000]
+            return text[:12000]
     return None
 
 
@@ -456,27 +474,31 @@ def enrich_recipe_text(
 ) -> tuple[str, str, str | None]:
     """Prefer formatted Markdown when it matches the scraped plain text."""
     rich_description = _schema_description(schema)
-    rich_instructions = None
+    schema_instructions = None
     raw_instructions = None
     if isinstance(schema, dict):
         raw_instructions = schema.get("recipeInstructions") or schema.get(
             "RecipeInstructions"
         )
-    if contains_markup(raw_instructions):
-        rich_instructions = schema_instructions_to_markdown(raw_instructions)
+    # Structured HowTo sections are useful even when the step text is plain.
+    if isinstance(raw_instructions, (list, dict)) or contains_markup(raw_instructions):
+        schema_instructions = schema_instructions_to_markdown(raw_instructions) or None
 
+    html_instructions = None
     if soup is not None:
         if not rich_description:
             candidate = _html_description(soup)
             if candidate and _compatible(candidate, description):
                 rich_description = candidate
-        if not rich_instructions:
-            candidate = _html_instructions(soup)
-            if candidate and _compatible(candidate, instructions):
-                rich_instructions = candidate
+        candidate = _html_instructions(soup)
+        if candidate and _compatible(candidate, instructions):
+            html_instructions = candidate
         notes = _html_notes(soup)
     else:
         notes = None
+
+    # The visible card keeps bold step labels. Schema sections are the fallback.
+    rich_instructions = html_instructions or schema_instructions
 
     return (
         (rich_description or description).strip(),

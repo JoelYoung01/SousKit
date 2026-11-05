@@ -2,6 +2,7 @@ import { splitInstructionSteps } from "@/lib/instructions";
 import { formatPrepTime } from "@/lib/media";
 import {
   formatIngredientAmountUnits,
+  ingredientGroupHeading,
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails,
   type IngredientLike
@@ -33,6 +34,19 @@ function formatIngredientLine(ingredient: IngredientLike): string {
   }
 
   return line;
+}
+
+function formatIngredientLines(ingredients: IngredientLike[]): string[] {
+  const lines: string[] = [];
+  ingredients.forEach((ingredient, index) => {
+    const group = ingredientGroupHeading(ingredients, index);
+    if (group) {
+      if (lines.length) lines.push("");
+      lines.push(`### ${group}`);
+    }
+    lines.push(formatIngredientLine(ingredient));
+  });
+  return lines;
 }
 
 function instructionsKeepMarkdown(instructions: string): boolean {
@@ -70,7 +84,7 @@ export function recipeToMarkdown(recipe: RecipeMarkdownSource): string {
 
   lines.push("## Ingredients", "");
   if (recipe.ingredients.length > 0) {
-    lines.push(...recipe.ingredients.map(formatIngredientLine));
+    lines.push(...formatIngredientLines(recipe.ingredients));
   } else {
     lines.push("- No ingredients listed.");
   }

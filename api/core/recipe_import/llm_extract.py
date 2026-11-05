@@ -66,12 +66,14 @@ def _normalize_llm_recipe(parsed: Any) -> dict[str, Any] | None:
             amount_f = None
         units = item.get("units")
         details = item.get("details")
+        group_name = item.get("group_name")
         ingredients.append(
             {
                 "name": name_i[:200],
                 "amount": amount_f,
                 "units": str(units)[:40] if units else None,
-                "details": str(details)[:200] if details else None,
+                "details": str(details)[:400] if details else None,
+                "group_name": str(group_name).strip()[:80] if group_name else None,
             }
         )
 
@@ -83,9 +85,9 @@ def _normalize_llm_recipe(parsed: Any) -> dict[str, Any] | None:
 
     return {
         "name": name[:200],
-        "description": description[:2000],
+        "description": description[:4000],
         "instructions": normalize_instruction_newlines(instructions)[:20000],
-        "notes": notes_str[:2000] if notes_str else None,
+        "notes": notes_str[:12000] if notes_str else None,
         "prep_time": prep_time,
         "ingredients": ingredients,
         "method": "llm",
@@ -120,7 +122,10 @@ async def extract_recipe_with_llm(
         "name (string), description (string), instructions (string), "
         "notes (string|null), prep_time (number minutes|null), ingredients "
         "(array of objects with name, amount number|null, units string|null, "
-        "details string|null). "
+        "details string|null, group_name string|null). "
+        "Set group_name when the page groups ingredients (Broth, Toppings). "
+        "Keep both sides of a dual measurement: amount and units are the first "
+        "quantity, and details starts with the other, such as or 3 lb. "
         "description, instructions, and notes are Markdown. Preserve bold "
         "(**like this**), italics (*like this*), and lists from the page. "
         "Put each instruction step on its own line, numbered, and use ## "

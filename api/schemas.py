@@ -251,6 +251,7 @@ class IngredientWrite(BaseModel):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    group_name: str | None = None
 
 
 class RecipeCreate(BaseModel):
@@ -358,6 +359,7 @@ class IngredientSnapshot(BaseModel):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    group_name: str | None = None
 
 
 class IngredientChange(BaseModel):
@@ -410,6 +412,7 @@ class IngredientSlim(BaseModel):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    group_name: str | None = None
 
 
 class IngredientDetail(IngredientSlim):
@@ -421,6 +424,7 @@ class IngredientCreate(BaseModel):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    group_name: str | None = None
     recipe_id: int
 
 
@@ -429,6 +433,7 @@ class IngredientUpdate(BaseModel):
     amount: float | None = None
     units: str | None = None
     details: str | None = None
+    group_name: str | None = None
 
 
 class UserUpdate(BaseModel):

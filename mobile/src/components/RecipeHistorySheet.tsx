@@ -60,7 +60,8 @@ function formatIngredient(row: IngredientSnapshot | null | undefined) {
   const units = row.units?.trim() ?? "";
   const qty = [amount, units].filter(Boolean).join(" ");
   const details = row.details?.trim();
-  return `${qty ? `${qty} ` : ""}${row.name}${details ? ` (${details})` : ""}`;
+  const group = row.group_name?.trim();
+  return `${qty ? `${qty} ` : ""}${row.name}${details ? ` (${details})` : ""}${group ? ` · ${group}` : ""}`;
 }
 
 type Props = {

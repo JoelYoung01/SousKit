@@ -14,6 +14,7 @@ import { recipeToMarkdown } from "@/lib/recipeMarkdown";
 import { tapHaptic } from "@/lib/haptics";
 import {
   formatIngredientAmountUnits,
+  ingredientGroupHeading,
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails
 } from "@/lib/ingredients";
@@ -273,15 +274,20 @@ export default function RecipeDetailScreen() {
               <View className="mt-5">
                 <Text className="mb-2 font-sans-semibold text-sm">Ingredients</Text>
                 <View className="gap-1.5">
-                  {(shown?.ingredients ?? []).map((ingredient) => {
+                  {(shown?.ingredients ?? []).map((ingredient, index, rows) => {
                     const amountUnits = formatIngredientAmountUnits(
                       ingredient.amount,
                       ingredient.units
                     );
                     const details = normalizeIngredientDetails(ingredient.details);
+                    const group = ingredientGroupHeading(rows, index);
 
                     return (
-                      <View key={ingredient.id} className="rounded-lg bg-secondary/40 px-3 py-2">
+                      <View key={ingredient.id} className="gap-1.5">
+                        {group ? (
+                          <Text className="px-1 pt-2 font-sans-semibold text-sm">{group}</Text>
+                        ) : null}
+                      <View className="rounded-lg bg-secondary/40 px-3 py-2">
                         <Text className="text-base leading-6">
                           {amountUnits ? (
                             <Text className="text-muted-foreground">{amountUnits}</Text>
@@ -294,6 +300,7 @@ export default function RecipeDetailScreen() {
                             <Text className="text-faint"> ({details})</Text>
                           ) : null}
                         </Text>
+                      </View>
                       </View>
                     );
                   })}

@@ -38,6 +38,7 @@ def _recipe_snapshot(recipe: Recipe) -> dict[str, Any]:
                 "amount": ing.amount,
                 "units": ing.units,
                 "details": ing.details,
+                "group_name": ing.group_name,
             }
         )
     return {
@@ -135,12 +136,14 @@ def _normalize_edit_result(
                 amount_f = None
             units = item.get("units")
             details = item.get("details")
+            group_name = item.get("group_name")
             ingredients.append(
                 {
                     "name": name_i[:200],
                     "amount": amount_f,
                     "units": str(units)[:40] if units else None,
-                    "details": str(details)[:200] if details else None,
+                    "details": str(details)[:400] if details else None,
+                    "group_name": str(group_name).strip()[:80] if group_name else None,
                 }
             )
     else:
@@ -197,7 +200,9 @@ async def patch_recipe_with_llm(
         "(string), instructions (string with numbered steps separated by "
         "newlines), notes (string|null), prep_time (number minutes|null), "
         "ingredients (array of objects with name, amount number|null, units "
-        "string|null, details string|null). "
+        "string|null, details string|null, group_name string|null). "
+        "group_name is the ingredient section, such as Broth or Toppings. "
+        "Preserve it unless the user asks to regroup. "
         "description, instructions, and notes may already contain Markdown "
         "(**bold**, *italics*, lists, and ## section headings). Preserve that "
         "formatting unless the user asks to change it. "
