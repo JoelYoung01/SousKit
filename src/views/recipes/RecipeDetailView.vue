@@ -238,8 +238,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- No top border: hero gradient already divides — avoid stacked hard edges -->
-    <div class="-mt-4 rounded-t-2xl border border-t-0 border-border bg-card px-5 pt-5 pb-8">
+    <div class="bg-background px-5 pt-5 pb-8">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h1 class="text-xl font-bold tracking-tight leading-tight">{{ shown.name }}</h1>

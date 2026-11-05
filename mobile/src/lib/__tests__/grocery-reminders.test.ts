@@ -137,6 +137,9 @@ describe("pushGroceryItemsToReminders", () => {
   beforeEach(() => {
     Object.defineProperty(Platform, "OS", { configurable: true, value: "ios" });
     jest.clearAllMocks();
+    // clearAllMocks keeps mockResolvedValue, so a read-only list from the
+    // previous test would leak into the next export.
+    Calendar.getCalendars.mockReset();
   });
 
   afterEach(() => {
@@ -196,12 +199,14 @@ describe("pushGroceryItemsToReminders", () => {
   it("puts ingredient notes above the source recipe", async () => {
     Calendar.getRemindersPermissions.mockResolvedValue({ granted: true });
     const createReminder = jest.fn().mockResolvedValue({ id: "r1" });
-    Calendar.ExpoCalendar.get.mockResolvedValue({
-      id: "list-1",
-      title: "Groceries",
-      allowsModifications: true,
-      createReminder
-    });
+    Calendar.getCalendars.mockResolvedValue([
+      {
+        id: "list-1",
+        title: "Groceries",
+        allowsModifications: true,
+        createReminder
+      }
+    ]);
 
     await pushGroceryItemsToReminders(
       [{ ...sampleItem, notes: ["whole", "not skim"] }],
@@ -212,6 +217,8 @@ describe("pushGroceryItemsToReminders", () => {
       title: "Milk (1 qt)",
       notes: "whole · not skim\nPancakes"
     });
+    expect(Calendar.getCalendars).toHaveBeenCalledWith("reminder");
+    expect(Calendar.ExpoCalendar.get).not.toHaveBeenCalled();
   });
 
   it("rejects when reminders permission is denied", async () => {
