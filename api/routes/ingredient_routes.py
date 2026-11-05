@@ -34,6 +34,7 @@ def _rows_from_head(head) -> list[dict]:
             "amount": ing.amount,
             "units": ing.units,
             "details": ing.details,
+            "group_name": ing.group_name,
         }
         for ing in head.ingredients or []
     ]

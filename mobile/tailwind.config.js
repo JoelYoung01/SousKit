@@ -57,8 +57,10 @@ module.exports = {
       },
       fontFamily: {
         sans: ["Figtree_400Regular"],
+        "sans-italic": ["Figtree_400Regular_Italic"],
         "sans-medium": ["Figtree_500Medium"],
         "sans-semibold": ["Figtree_600SemiBold"],
+        "sans-semibold-italic": ["Figtree_600SemiBold_Italic"],
         "sans-bold": ["Figtree_700Bold"],
       },
     },

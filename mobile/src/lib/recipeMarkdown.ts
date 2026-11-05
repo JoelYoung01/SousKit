@@ -1,6 +1,7 @@
 import { formatPrepTime } from "@/lib/dates";
 import {
   formatIngredientAmountUnits,
+  ingredientGroupHeading,
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails,
   type IngredientLike
@@ -35,8 +36,33 @@ function formatIngredientLine(ingredient: IngredientLike): string {
   return line;
 }
 
+function formatIngredientLines(ingredients: IngredientLike[]): string[] {
+  const lines: string[] = [];
+  ingredients.forEach((ingredient, index) => {
+    const group = ingredientGroupHeading(ingredients, index);
+    if (group) {
+      if (lines.length) lines.push("");
+      lines.push(`### ${group}`);
+    }
+    lines.push(formatIngredientLine(ingredient));
+  });
+  return lines;
+}
+
+function instructionsKeepMarkdown(instructions: string): boolean {
+  return (
+    /(^|\n)\s{0,3}#{1,3}\s+\S/.test(instructions) ||
+    /\*\*|__/.test(instructions) ||
+    /(^|\n)\s*[-*+]\s+\S/.test(instructions) ||
+    /\[[^\]]+\]\(https?:\/\//.test(instructions)
+  );
+}
+
 function formatInstructionLines(instructions: string): string[] {
-  return splitInstructionSteps(instructions).map((step, index) => {
+  const trimmed = instructions.trim();
+  if (!trimmed) return [];
+  if (instructionsKeepMarkdown(trimmed)) return [trimmed];
+  return splitInstructionSteps(trimmed).map((step, index) => {
     const cleaned = step.replace(/^\d+\.\s*/, "").trim();
     return `${index + 1}. ${cleaned}`;
   });
@@ -58,7 +84,7 @@ export function recipeToMarkdown(recipe: RecipeMarkdownSource): string {
 
   lines.push("## Ingredients", "");
   if (recipe.ingredients.length > 0) {
-    lines.push(...recipe.ingredients.map(formatIngredientLine));
+    lines.push(...formatIngredientLines(recipe.ingredients));
   } else {
     lines.push("- No ingredients listed.");
   }

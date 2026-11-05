@@ -27,7 +27,10 @@ describe("normalizeIngredientDetails", () => {
 
 describe("formatIngredientAmountUnits", () => {
   it("joins amount and units", () => {
-    expect(formatIngredientAmountUnits(0.5, "lb")).toBe("0.5 lb");
+    expect(formatIngredientAmountUnits(0.5, "lb")).toBe("1/2 lb");
+    expect(formatIngredientAmountUnits(0.75, "tsp")).toBe("3/4 tsp");
+    expect(formatIngredientAmountUnits(1.5, "kg")).toBe("1 1/2 kg");
+    expect(formatIngredientAmountUnits(2, null)).toBe("2");
   });
 
   it("handles amount-only and units-only values", () => {

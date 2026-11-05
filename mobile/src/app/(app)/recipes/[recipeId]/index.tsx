@@ -14,10 +14,11 @@ import { recipeToMarkdown } from "@/lib/recipeMarkdown";
 import { tapHaptic } from "@/lib/haptics";
 import {
   formatIngredientAmountUnits,
+  ingredientGroupHeading,
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails
 } from "@/lib/ingredients";
-import { splitInstructionSteps } from "@/lib/instructions";
+import { MarkdownBody } from "@/components/MarkdownBody";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
 import { useHousehold } from "@/hooks/use-household";
@@ -258,9 +259,7 @@ export default function RecipeDetailScreen() {
               {shown?.description ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">About</Text>
-                  <Text className="text-base leading-6 text-muted-foreground">
-                    {shown.description}
-                  </Text>
+                  <MarkdownBody source={shown.description} />
                 </View>
               ) : null}
 
@@ -274,15 +273,20 @@ export default function RecipeDetailScreen() {
               <View className="mt-5">
                 <Text className="mb-2 font-sans-semibold text-sm">Ingredients</Text>
                 <View className="gap-1.5">
-                  {(shown?.ingredients ?? []).map((ingredient) => {
+                  {(shown?.ingredients ?? []).map((ingredient, index, rows) => {
                     const amountUnits = formatIngredientAmountUnits(
                       ingredient.amount,
                       ingredient.units
                     );
                     const details = normalizeIngredientDetails(ingredient.details);
+                    const group = ingredientGroupHeading(rows, index);
 
                     return (
-                      <View key={ingredient.id} className="rounded-lg bg-secondary/40 px-3 py-2">
+                      <View key={ingredient.id} className="gap-1.5">
+                        {group ? (
+                          <Text className="px-1 pt-2 font-sans-semibold text-sm">{group}</Text>
+                        ) : null}
+                      <View className="rounded-lg bg-secondary/40 px-3 py-2">
                         <Text className="text-base leading-6">
                           {amountUnits ? (
                             <Text className="text-muted-foreground">{amountUnits}</Text>
@@ -296,6 +300,7 @@ export default function RecipeDetailScreen() {
                           ) : null}
                         </Text>
                       </View>
+                      </View>
                     );
                   })}
                   {(shown?.ingredients.length ?? 0) === 0 ? (
@@ -306,19 +311,13 @@ export default function RecipeDetailScreen() {
 
               <View className="mt-5">
                 <Text className="mb-1 font-sans-semibold text-sm">Instructions</Text>
-                <View className="gap-2.5">
-                  {splitInstructionSteps(shown?.instructions ?? "").map((step, idx) => (
-                    <Text key={`step-${idx}`} className="text-base leading-6 text-muted-foreground">
-                      {step}
-                    </Text>
-                  ))}
-                </View>
+                <MarkdownBody source={shown?.instructions ?? ""} />
               </View>
 
               {shown?.notes ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">Notes</Text>
-                  <Text className="text-base leading-6 text-muted-foreground">{shown.notes}</Text>
+                  <MarkdownBody source={shown.notes} />
                 </View>
               ) : null}
 

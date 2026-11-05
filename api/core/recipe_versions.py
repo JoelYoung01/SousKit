@@ -134,12 +134,14 @@ def normalize_ingredients(rows: list[dict[str, Any]] | None) -> list[dict[str, A
             amount_f = None
         units = row.get("units")
         details = row.get("details")
+        group_name = row.get("group_name")
         normalized.append(
             {
                 "name": name[:200],
                 "amount": amount_f,
                 "units": str(units).strip()[:40] if units else None,
-                "details": str(details).strip()[:200] if details else None,
+                "details": str(details).strip()[:400] if details else None,
+                "group_name": str(group_name).strip()[:80] if group_name else None,
             }
         )
     return normalized
@@ -186,6 +188,7 @@ def _ingredient_rows_from_version(version: RecipeVersion) -> list[dict[str, Any]
                 "amount": ing.amount,
                 "units": ing.units,
                 "details": ing.details,
+                "group_name": ing.group_name,
             }
             for ing in (version.ingredients or [])
         ]
@@ -196,7 +199,7 @@ def _fingerprint(
     content: RecipeContent, ingredients: list[dict[str, Any]]
 ) -> tuple[Any, ...]:
     ing_tuples = tuple(
-        (row["name"], row["amount"], row["units"], row["details"])
+        (row["name"], row["amount"], row["units"], row["details"], row["group_name"])
         for row in ingredients
     )
     return (
@@ -240,6 +243,7 @@ def _add_ingredients(
                 amount=row["amount"],
                 units=row["units"],
                 details=row["details"],
+                group_name=row["group_name"],
                 recipe_version_id=version.id,
             )
         )
@@ -548,6 +552,7 @@ def _ingredient_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         "amount": row["amount"],
         "units": row["units"],
         "details": row["details"],
+        "group_name": row.get("group_name"),
     }
 
 
@@ -582,8 +587,10 @@ def _ingredient_changes(
             )
             continue
         _, after = unused.pop(match_index)
-        if before["amount"] != after["amount"] or (before["details"] or None) != (
-            after["details"] or None
+        if (
+            before["amount"] != after["amount"]
+            or (before["details"] or None) != (after["details"] or None)
+            or (before.get("group_name") or None) != (after.get("group_name") or None)
         ):
             changes.append(
                 {

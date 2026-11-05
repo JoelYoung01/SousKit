@@ -411,7 +411,11 @@ class MealPlanWizardPipeline:
                 'Use source "library" and set existing_recipe_id when reusing '
                 'a library recipe; otherwise source "generated" and null id.\n'
                 "For instructions: use numbered steps (1. 2. 3. …) with a real "
-                "newline (\\n) between each step — never a single mashed paragraph."
+                "newline (\\n) between each step — never a single mashed paragraph. "
+                "description, instructions, and notes may use simple Markdown "
+                "(**bold**, *italics*, and lists). "
+                "Ingredient objects may include group_name for a section "
+                "such as Broth or Toppings."
             )
             title_lines = "\n".join(f"- {i.title}" for i in selected)
             user_prompt = (
@@ -640,7 +644,11 @@ class MealPlanWizardPipeline:
                 'Use source "library" and set existing_recipe_id when reusing '
                 'a library recipe; otherwise source "generated" and null id.\n'
                 "For instructions: use numbered steps (1. 2. 3. …) with a real "
-                "newline (\\n) between each step — never a single mashed paragraph."
+                "newline (\\n) between each step — never a single mashed paragraph. "
+                "description, instructions, and notes may use simple Markdown "
+                "(**bold**, *italics*, and lists). "
+                "Ingredient objects may include group_name for a section "
+                "such as Broth or Toppings."
             )
             user_prompt = (
                 "BUILD_RECIPES for these selected ideas:\n"

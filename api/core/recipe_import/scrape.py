@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from recipe_scrapers import scrape_html
 from recipe_scrapers._exceptions import RecipeScrapersExceptions
 
 from api.core.logging import logger
-from api.core.recipe_import.parse_ingredient import parse_ingredient_line
+from api.core.recipe_import.parse_ingredient import (
+    ingredients_from_html,
+    parse_ingredient_line,
+)
+from api.core.recipe_markup import enrich_recipe_text
 from api.core.recipe_text import normalize_instruction_newlines
 
 
@@ -76,6 +81,44 @@ def _prep_time_minutes(scraper) -> float | None:
     return minutes or None
 
 
+def _servings_sentence(schema: dict[str, Any] | None) -> str | None:
+    """Turn recipeYield into one line. Ranges win over a single count."""
+    if not isinstance(schema, dict):
+        return None
+    raw = schema.get("recipeYield")
+    if isinstance(raw, list):
+        texts = [str(item).strip() for item in raw if str(item).strip()]
+    elif raw:
+        texts = [str(raw).strip()]
+    else:
+        return None
+    chosen = next((text for text in texts if re.search(r"\d\s*[-–]\s*\d", text)), None)
+    if chosen is None and texts:
+        chosen = texts[0]
+    if not chosen:
+        return None
+    span = re.search(r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)", chosen)
+    if span:
+        return f"Serves {span.group(1)}–{span.group(2)}."
+    single = re.search(r"\d+(?:\.\d+)?", chosen)
+    if not single:
+        return None
+    count = single.group(0)
+    if count == "1":
+        return "Serves 1."
+    return f"Serves {count}."
+
+
+def _strip_video_boilerplate(description: str) -> str:
+    return re.sub(
+        r"^(?:\*\*)?\s*recipe video above\.?\s*(?:\*\*)?\s*",
+        "",
+        description,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
 def scrape_recipe_html(html: str, *, page_url: str) -> dict[str, Any] | None:
     """Extract a recipe dict from HTML, or None if nothing usable was found."""
     try:
@@ -110,10 +153,28 @@ def scrape_recipe_html(html: str, *, page_url: str) -> dict[str, Any] | None:
         return None
 
     description = (_safe_call(scraper.description, "") or "").strip()
+    schema = getattr(scraper, "schema", None)
+    schema_data = getattr(schema, "data", None)
+    soup = getattr(scraper, "soup", None)
+    schema = schema_data if isinstance(schema_data, dict) else None
+    description, instructions, notes = enrich_recipe_text(
+        soup=soup,
+        schema=schema,
+        description=description,
+        instructions=instructions,
+    )
+    description = _strip_video_boilerplate(description)
+    servings = _servings_sentence(schema)
+    if servings and not re.search(r"\bservings?\b|\bserves\b", description, re.I):
+        description = (
+            f"{description.rstrip()}\n\n{servings}" if description else servings
+        )
     if not description:
         description = f"Imported recipe: {title}"
 
-    ingredients = [parse_ingredient_line(line) for line in ingredient_lines]
+    ingredients = ingredients_from_html(soup)
+    if not ingredients:
+        ingredients = [parse_ingredient_line(line) for line in ingredient_lines]
     # Drop empty parse fallthroughs that lost the original text
     ingredients = [ing for ing in ingredients if (ing.get("name") or "").strip()]
     if not ingredients:
@@ -121,8 +182,9 @@ def scrape_recipe_html(html: str, *, page_url: str) -> dict[str, Any] | None:
 
     return {
         "name": title[:200],
-        "description": description[:2000],
-        "instructions": instructions[:20000],
+        "description": description[:4000],
+        "instructions": normalize_instruction_newlines(instructions)[:20000],
+        "notes": notes[:12000] if notes else None,
         "prep_time": _prep_time_minutes(scraper),
         "ingredients": ingredients,
         "method": "schema",

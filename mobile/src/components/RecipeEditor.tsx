@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownField } from "@/components/MarkdownField";
 import { colors } from "@/lib/colors";
 import {
   COVER_IMAGE_SOURCE_ITEMS,
@@ -57,9 +57,16 @@ interface IngredientForm {
   amount: string;
   units: string;
   details: string;
+  group_name: string;
 }
 
-const emptyIngredient = (): IngredientForm => ({ name: "", amount: "", units: "", details: "" });
+const emptyIngredient = (): IngredientForm => ({
+  name: "",
+  amount: "",
+  units: "",
+  details: "",
+  group_name: ""
+});
 
 function parseAmount(value: string): number | null {
   const trimmed = value.trim();
@@ -136,7 +143,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             name: i.name,
             amount: i.amount !== null && i.amount !== undefined ? String(i.amount) : "",
             units: i.units ?? "",
-            details: i.details ?? ""
+            details: i.details ?? "",
+            group_name: i.group_name ?? ""
           }))
         );
       })
@@ -168,7 +176,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
           name: row.name.trim(),
           amount: parseAmount(row.amount),
           units: row.units.trim() || null,
-          details: row.details.trim() || null
+          details: row.details.trim() || null,
+          group_name: row.group_name.trim() || null
         }))
         .filter((row) => row.name.length > 0)
     }),
@@ -542,28 +551,19 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             <Input value={name} onChangeText={setName} className="h-11 rounded-xl" />
           </View>
 
-          <View className="gap-2">
-            <Label>Description</Label>
-            <Textarea
-              value={description}
-              onChangeText={setDescription}
-              className="min-h-24 rounded-xl"
-            />
-          </View>
-
-          <View className="gap-2">
-            <Label>Instructions</Label>
-            <Textarea
-              value={instructions}
-              onChangeText={setInstructions}
-              className="min-h-32 rounded-xl"
-            />
-          </View>
-
-          <View className="gap-2">
-            <Label>Notes</Label>
-            <Textarea value={notes} onChangeText={setNotes} className="min-h-20 rounded-xl" />
-          </View>
+          <MarkdownField
+            label="Description"
+            value={description}
+            onChangeText={setDescription}
+            minHeightClass="min-h-24"
+          />
+          <MarkdownField
+            label="Instructions"
+            value={instructions}
+            onChangeText={setInstructions}
+            minHeightClass="min-h-32"
+          />
+          <MarkdownField label="Notes" value={notes} onChangeText={setNotes} minHeightClass="min-h-20" />
 
           <SourceLinkEditor links={sourceLinks} onChange={setSourceLinks} />
 
@@ -582,15 +582,40 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Add ingredient"
-              onPress={() => setIngredients((rows) => [...rows, emptyIngredient()])}
+              onPress={() =>
+                setIngredients((rows) => [
+                  ...rows,
+                  { ...emptyIngredient(), group_name: rows.at(-1)?.group_name ?? "" }
+                ])
+              }
               className="h-9 w-9 items-center justify-center rounded-lg active:bg-secondary"
             >
               <Plus size={16} color={colors.foreground} />
             </Pressable>
           </View>
 
-          {ingredients.map((ingredient, index) => (
+          {ingredients.map((ingredient, index) => {
+            const showGroup =
+              ingredient.group_name.trim().length > 0 &&
+              (index === 0 || ingredient.group_name !== ingredients[index - 1]?.group_name);
+            return (
             <View key={ingredient.id ?? `new-${index}`} className="gap-1.5">
+              {showGroup ? (
+                <Input
+                  value={ingredient.group_name}
+                  onChangeText={(value) => {
+                    setIngredients((rows) => {
+                      const current = rows[index]?.group_name ?? "";
+                      let end = index + 1;
+                      while (end < rows.length && rows[end]?.group_name === current) end += 1;
+                      return rows.map((row, cursor) =>
+                        cursor >= index && cursor < end ? { ...row, group_name: value } : row
+                      );
+                    });
+                  }}
+                  className="h-8 rounded-lg font-sans-semibold text-xs"
+                />
+              ) : null}
               <View className="flex-row gap-1.5">
                 <Input
                   value={ingredient.name}
@@ -629,7 +654,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
                 </Button>
               </View>
             </View>
-          ))}
+            );
+          })}
         </KeyboardAwareScrollView>
       ) : (
         <View className="flex-1 items-center justify-center px-6">

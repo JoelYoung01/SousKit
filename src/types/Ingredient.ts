@@ -6,6 +6,7 @@ export interface IngredientSlim {
   amount: number;
   units: string;
   details?: string;
+  group_name?: string | null;
 }
 
 export interface IngredientDetail extends IngredientSlim {
@@ -17,5 +18,6 @@ export interface IngredientCreate {
   amount: number;
   units: string;
   details?: string;
+  group_name?: string | null;
   recipe_id: number;
 }

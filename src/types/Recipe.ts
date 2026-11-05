@@ -116,6 +116,7 @@ export interface IngredientSnapshot {
   amount?: number | null;
   units?: string | null;
   details?: string | null;
+  group_name?: string | null;
 }
 
 export interface IngredientChange {

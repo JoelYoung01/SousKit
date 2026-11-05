@@ -8,6 +8,7 @@ import { Text } from "@/components/ui/text";
 import { colors } from "@/lib/colors";
 import { addDays, endOfDay, parseDateKey, startOfDay, startOfWeekMonday, toDateKey } from "@/lib/dates";
 import { tapHaptic } from "@/lib/haptics";
+import { markdownToPlain } from "@/lib/markdown";
 import { mediaSource } from "@/lib/media";
 import { syncAfterPlanMutation } from "@/hooks/sync";
 import { groupPlansByDay, usePlansRange } from "@/hooks/use-planner";
@@ -390,7 +391,7 @@ export default function PlannerScreen() {
                         {planned.recipe.name}
                       </Text>
                       <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                        {planned.recipe.description}
+                        {markdownToPlain(planned.recipe.description)}
                       </Text>
                     </View>
                   </Pressable>
@@ -513,7 +514,7 @@ export default function PlannerScreen() {
                       {recipe.name}
                     </Text>
                     <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                      {recipe.description}
+                      {markdownToPlain(recipe.description)}
                     </Text>
                   </View>
                 </Pressable>
@@ -608,7 +609,7 @@ export default function PlannerScreen() {
                       {recipe.name}
                     </Text>
                     <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                      {recipe.description}
+                      {markdownToPlain(recipe.description)}
                     </Text>
                   </View>
                 </Pressable>

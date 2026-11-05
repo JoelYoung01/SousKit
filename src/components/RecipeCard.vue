@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { markdownToPlain } from "@/lib/markdown";
 import { formatPrepTime, mediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { paths } from "@/sitemap";
@@ -64,7 +65,7 @@ function open() {
         {{ recipe.created_by.display_name }}
       </p>
       <p v-else-if="recipe.description" class="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-        {{ recipe.description }}
+        {{ markdownToPlain(recipe.description) }}
       </p>
       <p
         v-if="mode === 'default' && prep"
