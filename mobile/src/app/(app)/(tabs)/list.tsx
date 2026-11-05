@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/EmptyState";
+import { GroceryCollapse, GrocerySection } from "@/components/grocery/GroceryCollapse";
 import { GroceryExportSheet } from "@/components/grocery/GroceryExportSheet";
 import { SwipeRow } from "@/components/SwipeRow";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,9 @@ import {
   useSetGroceryStatus,
   useUpdateManualGroceryItem
 } from "@/hooks/use-grocery";
+import { useGroceryCheckoff } from "@/hooks/use-grocery-checkoff";
 import { colors } from "@/lib/colors";
+import { GROCERY_HEADER_GAP, GROCERY_ROW_GAP, GROCERY_SECTION_GAP } from "@/lib/grocery-checkoff";
 import { formatShortRange } from "@/lib/dates";
 import { getErrorMessage } from "@/api/errors";
 import { showGroceryItemContextMenu } from "@/lib/grocery-item-menu";
@@ -24,13 +27,10 @@ import { paths } from "@/lib/sitemap";
 import { GROCERY_WINDOW_OPTIONS, type GroceryItem } from "@/types";
 import { useRouter } from "expo-router";
 import { CalendarDays, ChevronDown, EyeOff, Plus, Share, ShoppingCart } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { ScrollView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-/** How long a crossed-off item stays visible so the user can undo. */
-const UNDO_MS = 2000;
 
 export default function GroceryListScreen() {
   const router = useRouter();
@@ -41,8 +41,8 @@ export default function GroceryListScreen() {
   const [newItemName, setNewItemName] = useState("");
   const [editingItem, setEditingItem] = useState<GroceryItem | null>(null);
   const [editName, setEditName] = useState("");
-  const [pendingHideKeys, setPendingHideKeys] = useState<Set<string>>(() => new Set());
-  const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** Keys whose collapse finished and whose dismiss is still landing. */
+  const [committed, setCommitted] = useState<ReadonlySet<string>>(() => new Set());
 
   const { windowDays, setWindowDays } = useGroceryWindow();
   const list = useGroceryList();
@@ -53,10 +53,48 @@ export default function GroceryListScreen() {
 
   const items = useMemo(() => list.data?.items ?? [], [list.data]);
 
+  const checkoff = useGroceryCheckoff((keys) => {
+    setCommitted((prev) => {
+      const next = new Set(prev);
+      for (const key of keys) next.add(key);
+      return next;
+    });
+    for (const key of keys) {
+      const item = items.find((candidate) => candidate.key === key);
+      if (!item || item.dismissed || item.deleted) continue;
+      setStatus.mutate(
+        { item, status: "dismissed" },
+        {
+          onError: () => {
+            setCommitted((prev) => {
+              if (!prev.has(key)) return prev;
+              const next = new Set(prev);
+              next.delete(key);
+              return next;
+            });
+          }
+        }
+      );
+    }
+  }, !showDismissed);
+
+  const concealed = useMemo(() => {
+    if (committed.size === 0) return committed;
+    const next = new Set<string>();
+    for (const key of committed) {
+      const item = items.find((candidate) => candidate.key === key);
+      if (item && !item.dismissed && !item.deleted) next.add(key);
+    }
+    return next.size === committed.size ? committed : next;
+  }, [committed, items]);
+
   const visibleItems = useMemo(() => {
-    if (showDismissed) return items.filter((i) => !i.deleted);
-    return items.filter((i) => !i.dismissed && !i.deleted);
-  }, [items, showDismissed]);
+    return items.filter((item) => {
+      if (item.deleted) return false;
+      if (showDismissed) return true;
+      return !item.dismissed && !concealed.has(item.key);
+    });
+  }, [concealed, items, showDismissed]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, GroceryItem[]>();
@@ -91,54 +129,33 @@ export default function GroceryListScreen() {
   }, [windowDays]);
 
   const showSkeleton = list.isPending;
+  const pruneCheckedOff = checkoff.prune;
 
-  useEffect(
-    () => () => {
-      for (const timer of hideTimers.current.values()) clearTimeout(timer);
-      hideTimers.current.clear();
-    },
-    []
-  );
+  useEffect(() => {
+    pruneCheckedOff(new Set(items.map((item) => item.key)));
+  }, [items, pruneCheckedOff]);
 
   function isCrossed(item: GroceryItem) {
-    return item.dismissed || pendingHideKeys.has(item.key);
+    return item.dismissed || concealed.has(item.key) || checkoff.isHeld(item.key);
   }
 
-  function clearPending(key: string) {
-    const timer = hideTimers.current.get(key);
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      hideTimers.current.delete(key);
-    }
-    setPendingHideKeys((prev) => {
-      if (!prev.has(key)) return prev;
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
+  function sectionIsLeaving(categoryItems: GroceryItem[]) {
+    return categoryItems.length > 0 && categoryItems.every((item) => checkoff.isLeaving(item.key));
   }
 
   function queueHide(item: GroceryItem) {
-    if (item.dismissed || pendingHideKeys.has(item.key)) return;
-    setPendingHideKeys((prev) => new Set(prev).add(item.key));
-    const timer = setTimeout(() => {
-      hideTimers.current.delete(item.key);
-      setPendingHideKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(item.key);
-        return next;
-      });
-      setStatus.mutate({ item, status: "dismissed" });
-    }, UNDO_MS);
-    hideTimers.current.set(item.key, timer);
+    checkoff.noteActivity();
+    if (item.dismissed || item.deleted || checkoff.isHeld(item.key)) return;
+    checkoff.queue(item.key);
   }
 
   function onRowTap(item: GroceryItem) {
     tapHaptic();
-    if (pendingHideKeys.has(item.key)) {
-      clearPending(item.key);
+    if (checkoff.isHeld(item.key)) {
+      checkoff.drop(item.key);
       return;
     }
+    checkoff.noteActivity();
     if (item.dismissed) {
       setStatus.mutate({ item, status: item.auto_dismissed ? "restored" : null });
       return;
@@ -158,7 +175,7 @@ export default function GroceryListScreen() {
   }
 
   function onDelete(item: GroceryItem) {
-    clearPending(item.key);
+    checkoff.drop(item.key);
     if (item.is_manual && item.recipes.length === 0 && item.manual_item_ids.length > 0) {
       deleteManual.mutate(item.manual_item_ids[0]);
       return;
@@ -233,6 +250,9 @@ export default function GroceryListScreen() {
         paddingHorizontal: 16,
         paddingBottom: 24
       }}
+      onTouchStart={checkoff.noteActivity}
+      onTouchMove={checkoff.noteActivity}
+      onScrollBeginDrag={checkoff.noteActivity}
       refreshControl={
         <RefreshControl
           refreshing={!list.isPending && list.isRefetching}
@@ -354,7 +374,10 @@ export default function GroceryListScreen() {
         <Input
           className="flex-1 bg-card"
           value={newItemName}
-          onChangeText={setNewItemName}
+          onChangeText={(value) => {
+            checkoff.noteActivity();
+            setNewItemName(value);
+          }}
           placeholder="Add an item…"
           autoCapitalize="sentences"
           returnKeyType="done"
@@ -436,82 +459,100 @@ export default function GroceryListScreen() {
           }
         />
       ) : (
-        <View className="mt-5 gap-5">
-          {grouped.map((group) => (
-            <View key={group.category} className="gap-2">
-              <Text className="px-0.5 font-sans-bold text-[11px] uppercase tracking-[0.08em] text-faint">
-                {group.category}
-              </Text>
-              <View className="gap-1.5">
-                {group.items.map((item) => {
-                  const crossed = isCrossed(item);
-                  return (
-                    <SwipeRow
-                      key={item.key}
-                      onDismiss={() => queueHide(item)}
-                      onDelete={() => onDelete(item)}
-                      onView={item.recipes.length > 0 ? () => onViewRecipe(item) : undefined}
-                    >
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityState={{ checked: crossed }}
-                        accessibilityLabel={
-                          crossed ? `Restore ${item.name}` : `Cross off ${item.name}`
-                        }
-                        onPress={() => onRowTap(item)}
-                        onLongPress={() => onRowLongPress(item)}
-                        delayLongPress={400}
-                        className={
-                          crossed
-                            ? "flex-row items-start gap-3 rounded-xl border border-border px-3 py-3 opacity-55"
-                            : "flex-row items-start gap-3 rounded-xl border border-border px-3 py-3"
-                        }
+        <View className="mt-5">
+          {grouped.map((group, index) => {
+            const leavingSection = sectionIsLeaving(group.items);
+            return (
+              <GrocerySection
+                key={group.category}
+                leaving={leavingSection}
+                gap={index < grouped.length - 1 ? GROCERY_SECTION_GAP : 0}
+              >
+                <GroceryCollapse leaving={leavingSection} marginBottom={GROCERY_HEADER_GAP}>
+                  <Text className="px-0.5 font-sans-bold text-[11px] uppercase tracking-[0.08em] text-faint">
+                    {group.category}
+                  </Text>
+                </GroceryCollapse>
+                <View>
+                  {group.items.map((item) => {
+                    const crossed = isCrossed(item);
+                    return (
+                      <GroceryCollapse
+                        key={item.key}
+                        leaving={checkoff.isLeaving(item.key)}
+                        marginBottom={GROCERY_ROW_GAP}
                       >
-                        <View pointerEvents="none" className="mt-0.5">
-                          <Checkbox
-                            className="h-5 w-5"
-                            checked={crossed}
-                            onCheckedChange={() => {
-                              /* decorative — whole row handles toggle */
-                            }}
-                          />
-                        </View>
-                        <View className="min-w-0 flex-1">
-                          <View className="flex-row items-baseline justify-between gap-2">
-                            <Text
-                              className={
-                                crossed
-                                  ? "flex-1 font-sans-semibold text-sm leading-snug text-muted-foreground line-through"
-                                  : "flex-1 font-sans-semibold text-sm leading-snug"
-                              }
-                            >
-                              {item.name}
-                            </Text>
-                            {item.quantity_display ? (
-                              <Text className="shrink-0 font-sans-medium text-xs text-[#86efac]">
-                                {item.quantity_display}
-                              </Text>
-                            ) : null}
-                          </View>
-                          {item.recipe_titles ? (
-                            <Text numberOfLines={1} className="mt-0.5 text-xs text-muted-foreground">
-                              {item.recipe_titles}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    </SwipeRow>
-                  );
-                })}
-              </View>
-            </View>
-          ))}
+                        <SwipeRow
+                          onDismiss={() => queueHide(item)}
+                          onDelete={() => onDelete(item)}
+                          onView={item.recipes.length > 0 ? () => onViewRecipe(item) : undefined}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityState={{ checked: crossed }}
+                            accessibilityLabel={
+                              crossed ? `Restore ${item.name}` : `Cross off ${item.name}`
+                            }
+                            onPress={() => onRowTap(item)}
+                            onLongPress={() => onRowLongPress(item)}
+                            delayLongPress={400}
+                            className={
+                              crossed
+                                ? "flex-row items-start gap-3 rounded-xl border border-border px-3 py-3 opacity-55"
+                                : "flex-row items-start gap-3 rounded-xl border border-border px-3 py-3"
+                            }
+                          >
+                            <View pointerEvents="none" className="mt-0.5">
+                              <Checkbox
+                                className="h-5 w-5"
+                                checked={crossed}
+                                onCheckedChange={() => {
+                                  /* decorative — whole row handles toggle */
+                                }}
+                              />
+                            </View>
+                            <View className="min-w-0 flex-1">
+                              <View className="flex-row items-baseline justify-between gap-2">
+                                <Text
+                                  className={
+                                    crossed
+                                      ? "flex-1 font-sans-semibold text-sm leading-snug text-muted-foreground line-through"
+                                      : "flex-1 font-sans-semibold text-sm leading-snug"
+                                  }
+                                >
+                                  {item.name}
+                                </Text>
+                                {item.quantity_display ? (
+                                  <Text className="shrink-0 font-sans-medium text-xs text-[#86efac]">
+                                    {item.quantity_display}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              {item.recipe_titles ? (
+                                <Text
+                                  numberOfLines={1}
+                                  className="mt-0.5 text-xs text-muted-foreground"
+                                >
+                                  {item.recipe_titles}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </Pressable>
+                        </SwipeRow>
+                      </GroceryCollapse>
+                    );
+                  })}
+                </View>
+              </GrocerySection>
+            );
+          })}
         </View>
       )}
 
       <Sheet
         visible={editingItem !== null}
         onClose={() => setEditingItem(null)}
+        onActivity={checkoff.noteActivity}
         footer={
           <View className="flex-row gap-2">
             <Button
@@ -537,7 +578,10 @@ export default function GroceryListScreen() {
           <Input
             className="bg-card"
             value={editName}
-            onChangeText={setEditName}
+            onChangeText={(value) => {
+              checkoff.noteActivity();
+              setEditName(value);
+            }}
             placeholder="Item name"
             autoCapitalize="sentences"
             returnKeyType="done"
@@ -551,6 +595,7 @@ export default function GroceryListScreen() {
       <GroceryExportSheet
         visible={showExport}
         onClose={() => setShowExport(false)}
+        onActivity={checkoff.noteActivity}
         items={items}
       />
     </ScrollView>

@@ -4,17 +4,21 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useGroceryCheckoff } from "@/composables/useGroceryCheckoff";
+import {
+  GROCERY_CHECKOFF_COLLAPSE_MS,
+  GROCERY_HEADER_GAP,
+  GROCERY_ROW_GAP,
+  GROCERY_SECTION_GAP
+} from "@/lib/grocery-checkoff";
 import { paths } from "@/sitemap";
 import { useGroceryStore } from "@/stores/grocery";
 import { GROCERY_WINDOW_OPTIONS, type GroceryItem, type GroceryWindowChoice } from "@/types";
 import { CalendarDays, ChevronDown, Eye, EyeOff, Plus, ShoppingCart, Trash2 } from "@lucide/vue";
-import { computed, onActivated, onMounted, onUnmounted, ref } from "vue";
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 defineOptions({ name: "ShoppingListView" });
-
-/** How long a crossed-off item stays visible so the user can undo. */
-const UNDO_MS = 2000;
 
 const router = useRouter();
 const groceryStore = useGroceryStore();
@@ -23,15 +27,34 @@ const showDismissed = ref(false);
 const showWindowPicker = ref(false);
 const newItemName = ref("");
 const addingItem = ref(false);
-/** Keys waiting out the undo window before a real dismiss is persisted. */
-const pendingHideKeys = ref<Set<string>>(new Set());
-const hideTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Keys whose collapse finished and whose dismiss is still landing. */
+const committed = ref<ReadonlySet<string>>(new Set());
+
+const checkoff = useGroceryCheckoff(
+  (keys) => {
+    const next = new Set(committed.value);
+    for (const key of keys) next.add(key);
+    committed.value = next;
+    for (const key of keys) {
+      const item = groceryStore.items.find((candidate) => candidate.key === key);
+      if (!item || item.dismissed || item.deleted) continue;
+      void groceryStore.setStatus(item, "dismissed").catch(() => {
+        if (!committed.value.has(key)) return;
+        const restored = new Set(committed.value);
+        restored.delete(key);
+        committed.value = restored;
+      });
+    }
+  },
+  () => !showDismissed.value
+);
 
 const visibleItems = computed(() => {
-  if (showDismissed.value) {
-    return groceryStore.items.filter((i) => !i.deleted);
-  }
-  return groceryStore.items.filter((i) => !i.dismissed && !i.deleted);
+  return groceryStore.items.filter((item) => {
+    if (item.deleted) return false;
+    if (showDismissed.value) return true;
+    return !item.dismissed && !committed.value.has(item.key);
+  });
 });
 
 const grouped = computed(() => {
@@ -89,39 +112,30 @@ const showSkeleton = computed(
 );
 
 function isCrossed(item: GroceryItem) {
-  return item.dismissed || pendingHideKeys.value.has(item.key);
+  return item.dismissed || committed.value.has(item.key) || checkoff.isHeld(item.key);
 }
 
-function clearPending(key: string) {
-  const timer = hideTimers.get(key);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    hideTimers.delete(key);
-  }
-  if (pendingHideKeys.value.has(key)) {
-    const next = new Set(pendingHideKeys.value);
-    next.delete(key);
-    pendingHideKeys.value = next;
-  }
+function isSectionLeaving(categoryItems: GroceryItem[]) {
+  return categoryItems.length > 0 && categoryItems.every((item) => checkoff.isLeaving(item.key));
+}
+
+function sectionGap(index: number) {
+  return index < grouped.value.length - 1 ? GROCERY_SECTION_GAP : 0;
 }
 
 function queueHide(item: GroceryItem) {
-  if (item.dismissed || pendingHideKeys.value.has(item.key)) return;
-  pendingHideKeys.value = new Set(pendingHideKeys.value).add(item.key);
-  const timer = setTimeout(() => {
-    hideTimers.delete(item.key);
-    pendingHideKeys.value = new Set([...pendingHideKeys.value].filter((key) => key !== item.key));
-    void groceryStore.setStatus(item, "dismissed");
-  }, UNDO_MS);
-  hideTimers.set(item.key, timer);
+  checkoff.noteActivity();
+  if (item.dismissed || item.deleted || checkoff.isHeld(item.key)) return;
+  checkoff.queue(item.key);
 }
 
-/** Whole-row tap: cross off with a short undo window, or restore. */
+/** Whole-row tap: cross off, undo, or restore. */
 function onRowTap(item: GroceryItem) {
-  if (pendingHideKeys.value.has(item.key)) {
-    clearPending(item.key);
+  if (checkoff.isHeld(item.key)) {
+    checkoff.drop(item.key);
     return;
   }
+  checkoff.noteActivity();
   if (item.dismissed) {
     void groceryStore.setStatus(item, item.auto_dismissed ? "restored" : null);
     return;
@@ -152,7 +166,7 @@ async function load(force = true) {
 }
 
 function onDelete(item: GroceryItem) {
-  clearPending(item.key);
+  checkoff.drop(item.key);
   if (item.is_manual && item.recipes.length === 0 && item.manual_item_ids.length > 0) {
     void groceryStore.deleteManualItem(item.manual_item_ids[0]);
     return;
@@ -169,12 +183,60 @@ function onViewRecipe(item: GroceryItem) {
   });
 }
 
-onMounted(() => load());
-onActivated(() => load());
-onUnmounted(() => {
-  for (const timer of hideTimers.values()) clearTimeout(timer);
-  hideTimers.clear();
+watch(
+  () => groceryStore.items,
+  (items) => {
+    checkoff.prune(new Set(items.map((item) => item.key)));
+    if (committed.value.size === 0) return;
+    let changed = false;
+    const next = new Set(committed.value);
+    for (const key of committed.value) {
+      const item = items.find((candidate) => candidate.key === key);
+      if (!item || item.dismissed || item.deleted) {
+        next.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) committed.value = next;
+  }
+);
+
+let activityBound = false;
+
+function onPointerMove(event: PointerEvent) {
+  if (event.buttons > 0) checkoff.noteActivity();
+}
+
+function bindActivity() {
+  if (activityBound) return;
+  activityBound = true;
+  window.addEventListener("pointerdown", checkoff.noteActivity, true);
+  window.addEventListener("pointermove", onPointerMove, true);
+  window.addEventListener("keydown", checkoff.noteActivity, true);
+  window.addEventListener("wheel", checkoff.noteActivity, { capture: true, passive: true });
+  window.addEventListener("input", checkoff.noteActivity, true);
+}
+
+function unbindActivity() {
+  if (!activityBound) return;
+  activityBound = false;
+  window.removeEventListener("pointerdown", checkoff.noteActivity, true);
+  window.removeEventListener("pointermove", onPointerMove, true);
+  window.removeEventListener("keydown", checkoff.noteActivity, true);
+  window.removeEventListener("wheel", checkoff.noteActivity, true);
+  window.removeEventListener("input", checkoff.noteActivity, true);
+}
+
+onMounted(() => {
+  bindActivity();
+  void load();
 });
+onActivated(() => {
+  bindActivity();
+  void load();
+});
+onDeactivated(unbindActivity);
+onUnmounted(unbindActivity);
 </script>
 
 <template>
@@ -336,84 +398,152 @@ onUnmounted(() => {
       </Button>
     </div>
 
-    <div v-else class="mt-5 flex flex-col gap-5">
-      <section v-for="group in grouped" :key="group.category" class="flex flex-col gap-2">
-        <h2 class="px-0.5 text-[11px] font-bold tracking-[0.08em] text-faint uppercase">
-          {{ group.category }}
-        </h2>
-        <div class="flex flex-col gap-1.5">
-          <SwipeRow v-for="item in group.items" :key="item.key" @swipe-right="queueHide(item)">
-            <template #hint>
-              <div class="flex w-28 items-center bg-[rgba(34,197,94,0.22)] pl-4">
-                <span class="text-xs font-semibold text-[#4ade80]">Dismiss</span>
-              </div>
-            </template>
+    <div v-else class="mt-5">
+      <section
+        v-for="(group, index) in grouped"
+        :key="group.category"
+        class="grocery-section"
+        :class="{ 'is-leaving': isSectionLeaving(group.items) }"
+        :style="{
+          '--section-gap': `${sectionGap(index)}px`,
+          '--grocery-collapse': `${GROCERY_CHECKOFF_COLLAPSE_MS}ms`
+        }"
+      >
+        <div
+          class="grocery-collapse"
+          :class="{ 'is-leaving': isSectionLeaving(group.items) }"
+          :style="{
+            '--grocery-gap': `${GROCERY_HEADER_GAP}px`,
+            '--grocery-collapse': `${GROCERY_CHECKOFF_COLLAPSE_MS}ms`
+          }"
+        >
+          <div class="grocery-collapse-clip">
+            <h2 class="px-0.5 text-[11px] font-bold tracking-[0.08em] text-faint uppercase">
+              {{ group.category }}
+            </h2>
+          </div>
+        </div>
+        <div>
+          <div
+            v-for="item in group.items"
+            :key="item.key"
+            class="grocery-collapse"
+            :class="{ 'is-leaving': checkoff.isLeaving(item.key) }"
+            :style="{
+              '--grocery-gap': `${GROCERY_ROW_GAP}px`,
+              '--grocery-collapse': `${GROCERY_CHECKOFF_COLLAPSE_MS}ms`
+            }"
+          >
+            <div class="grocery-collapse-clip">
+              <SwipeRow @swipe-right="queueHide(item)">
+                <template #hint>
+                  <div class="flex w-28 items-center bg-[rgba(34,197,94,0.22)] pl-4">
+                    <span class="text-xs font-semibold text-[#4ade80]">Dismiss</span>
+                  </div>
+                </template>
 
-            <template #actions="{ open, close }">
-              <button
-                type="button"
-                class="flex flex-1 items-center justify-center bg-[#3f463f] text-foreground transition-opacity active:opacity-80"
-                :tabindex="open ? 0 : -1"
-                aria-label="View recipe"
-                :disabled="item.recipes.length === 0"
-                @click.stop="
-                  close();
-                  onViewRecipe(item);
-                "
-              >
-                <Eye class="size-5" :stroke-width="2" />
-              </button>
-              <button
-                type="button"
-                class="flex flex-1 items-center justify-center bg-[#dc2626] text-primary-foreground transition-opacity active:opacity-80"
-                :tabindex="open ? 0 : -1"
-                aria-label="Remove from list"
-                @click.stop="
-                  close();
-                  onDelete(item);
-                "
-              >
-                <Trash2 class="size-5" :stroke-width="2" />
-              </button>
-            </template>
+                <template #actions="{ open, close }">
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center bg-[#3f463f] text-foreground transition-opacity active:opacity-80"
+                    :tabindex="open ? 0 : -1"
+                    aria-label="View recipe"
+                    :disabled="item.recipes.length === 0"
+                    @click.stop="
+                      close();
+                      onViewRecipe(item);
+                    "
+                  >
+                    <Eye class="size-5" :stroke-width="2" />
+                  </button>
+                  <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center bg-[#dc2626] text-primary-foreground transition-opacity active:opacity-80"
+                    :tabindex="open ? 0 : -1"
+                    aria-label="Remove from list"
+                    @click.stop="
+                      close();
+                      onDelete(item);
+                    "
+                  >
+                    <Trash2 class="size-5" :stroke-width="2" />
+                  </button>
+                </template>
 
-            <button
-              type="button"
-              class="flex w-full items-start gap-3 border border-border px-3 py-3 text-left transition-opacity"
-              :class="isCrossed(item) ? 'opacity-55' : ''"
-              :aria-pressed="isCrossed(item)"
-              :aria-label="isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`"
-              @click="onRowTap(item)"
-            >
-              <Checkbox
-                class="pointer-events-none mt-0.5"
-                tabindex="-1"
-                :model-value="isCrossed(item)"
-                :aria-hidden="true"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-baseline justify-between gap-2">
-                  <p
-                    class="text-sm font-semibold leading-snug"
-                    :class="isCrossed(item) ? 'line-through text-muted-foreground' : ''"
-                  >
-                    {{ item.name }}
-                  </p>
-                  <p
-                    v-if="item.quantity_display"
-                    class="shrink-0 text-[12.5px] font-medium text-[#86efac]"
-                  >
-                    {{ item.quantity_display }}
-                  </p>
-                </div>
-                <p class="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                  {{ item.recipe_titles }}
-                </p>
-              </div>
-            </button>
-          </SwipeRow>
+                <button
+                  type="button"
+                  class="flex w-full items-start gap-3 border border-border px-3 py-3 text-left transition-opacity"
+                  :class="isCrossed(item) ? 'opacity-55' : ''"
+                  :aria-pressed="isCrossed(item)"
+                  :aria-label="isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`"
+                  @click="onRowTap(item)"
+                >
+                  <Checkbox
+                    class="pointer-events-none mt-0.5"
+                    tabindex="-1"
+                    :model-value="isCrossed(item)"
+                    :aria-hidden="true"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-baseline justify-between gap-2">
+                      <p
+                        class="text-sm font-semibold leading-snug"
+                        :class="isCrossed(item) ? 'line-through text-muted-foreground' : ''"
+                      >
+                        {{ item.name }}
+                      </p>
+                      <p
+                        v-if="item.quantity_display"
+                        class="shrink-0 text-[12.5px] font-medium text-[#86efac]"
+                      >
+                        {{ item.quantity_display }}
+                      </p>
+                    </div>
+                    <p class="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                      {{ item.recipe_titles }}
+                    </p>
+                  </div>
+                </button>
+              </SwipeRow>
+            </div>
+          </div>
         </div>
       </section>
     </div>
   </div>
 </template>
+
+<style scoped>
+.grocery-section {
+  margin-bottom: var(--section-gap, 0px);
+  transition: margin-bottom var(--grocery-collapse, 320ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+.grocery-section.is-leaving {
+  margin-bottom: 0;
+}
+.grocery-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: var(--grocery-gap, 0px);
+  opacity: 1;
+  transition:
+    grid-template-rows var(--grocery-collapse, 320ms) cubic-bezier(0.22, 1, 0.36, 1),
+    margin-bottom var(--grocery-collapse, 320ms) cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease;
+}
+.grocery-collapse.is-leaving {
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
+  opacity: 0;
+}
+.grocery-collapse-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grocery-section,
+  .grocery-collapse {
+    transition-duration: 1ms;
+  }
+}
+</style>
