@@ -48,6 +48,10 @@ def recipe_embedding_text(recipe: Recipe) -> str:
         f"Ingredients: {', '.join(ingredient_names)}",
         f"Notes: {(recipe.notes or '').strip()}",
         f"Instructions: {instructions}",
+        "Sources: "
+        + ", ".join(
+            f"{link['name']} {link['url']}" for link in (recipe.source_links or [])
+        ),
     ]
     if recipe.prep_time is not None:
         chunks.append(f"Prep time minutes: {recipe.prep_time}")
@@ -191,6 +195,7 @@ def _field_match_clause(like: str) -> Any:
         col(RecipeVersion.description).ilike(like),
         col(RecipeVersion.instructions).ilike(like),
         col(RecipeVersion.notes).ilike(like),
+        col(RecipeVersion.source_links_json).ilike(like),
         RecipeVersion.ingredients.any(
             or_(
                 col(Ingredient.name).ilike(like),
@@ -239,6 +244,9 @@ def _recipe_search_blob(recipe: Recipe) -> str:
         recipe.description or "",
         recipe.instructions or "",
         recipe.notes or "",
+        " ".join(
+            f"{link['name']} {link['url']}" for link in (recipe.source_links or [])
+        ),
     ]
     for ing in recipe.ingredients or []:
         parts.append(ing.name or "")

@@ -2,6 +2,12 @@ import type { IngredientSlim } from "./Ingredient";
 import type { UploadSlim } from "./Upload";
 import type { UserResponse } from "./User";
 
+export interface RecipeSourceLink {
+  /** Chip label, usually the website name. */
+  name: string;
+  url: string;
+}
+
 export interface RecipeSlim {
   id: number;
   slug: string;
@@ -17,6 +23,7 @@ export interface RecipeSlim {
   prep_time?: number;
   cover_image_id?: number;
   head_version_number: number;
+  source_links?: RecipeSourceLink[];
 }
 
 export interface RecipeDetail extends RecipeSlim {
@@ -66,6 +73,7 @@ export interface RecipeCreate {
   prep_time?: number;
   cover_image_id?: number;
   ingredients?: RecipeIngredientWrite[];
+  source_links?: RecipeSourceLink[];
 }
 
 export interface RecipeVersionSummary {
@@ -87,6 +95,7 @@ export interface RecipeVersionDetail extends RecipeVersionSummary {
   cover_image_id?: number | null;
   cover_image?: UploadSlim | null;
   ingredients: IngredientSlim[];
+  source_links?: RecipeSourceLink[];
 }
 
 export interface InstructionHunk {

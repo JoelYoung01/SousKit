@@ -47,6 +47,7 @@ from api.core.recipe_versions import (
     version_detail,
     version_summary,
 )
+from api.core.source_links import SourceLinkError, resolve_source_link
 from api.models import Recipe, RecipeVersion
 from api.schemas import (
     CountResponse,
@@ -57,6 +58,8 @@ from api.schemas import (
     RecipeCreate,
     RecipeDetail,
     RecipeImportFromUrlRequest,
+    RecipeSourceLink,
+    RecipeSourceLinkResolveRequest,
     RecipeUpdate,
     RecipeVersionDetail,
     RecipeVersionDiff,
@@ -134,10 +137,26 @@ async def import_recipe_from_url_route(
         prep_time=draft.prep_time,
         cover_image_id=cover.id if cover is not None else None,
         ingredients=draft.ingredients,
+        source_links=draft.source_links,
         change_kind=CHANGE_IMPORT,
     )
     refresh_recipe_embedding(session, recipe, commit=True)
     return _load_recipe(session, recipe.id)
+
+
+@router.post("/source-links/resolve/", response_model=RecipeSourceLink)
+def resolve_recipe_source_link(
+    body: RecipeSourceLinkResolveRequest,
+):
+    """Fetch a page and return the site name to show on a source chip.
+
+    The URL is stored separately. A site that blocks the lookup still returns
+    a hostname label so the editor can save the link.
+    """
+    try:
+        return resolve_source_link(body.url)
+    except RecipeImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 @router.post("/generate-cover/", response_model=RecipeCoverGenerateResponse)
@@ -440,19 +459,24 @@ def create_recipe(
     household = ensure_user_household(session, currentUser)
     payload = recipe.model_dump()
     ingredients = payload.pop("ingredients")
-    db_recipe = save_new_recipe(
-        session,
-        user_id=currentUser.id,
-        household_id=household.id,
-        public=payload["public"],
-        name=payload["name"],
-        description=payload["description"],
-        instructions=payload["instructions"],
-        notes=payload.get("notes"),
-        prep_time=payload.get("prep_time"),
-        cover_image_id=payload.get("cover_image_id"),
-        ingredients=ingredients,
-    )
+    source_links = payload.pop("source_links", None)
+    try:
+        db_recipe = save_new_recipe(
+            session,
+            user_id=currentUser.id,
+            household_id=household.id,
+            public=payload["public"],
+            name=payload["name"],
+            description=payload["description"],
+            instructions=payload["instructions"],
+            notes=payload.get("notes"),
+            prep_time=payload.get("prep_time"),
+            cover_image_id=payload.get("cover_image_id"),
+            ingredients=ingredients,
+            source_links=source_links,
+        )
+    except SourceLinkError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     refresh_recipe_embedding(session, db_recipe, commit=True)
     return _load_recipe(session, db_recipe.id)
 
@@ -488,12 +512,15 @@ def update_recipe(
             detail="No recipe fields were provided to update.",
         )
 
-    updated = apply_recipe_update(
-        session,
-        existing_recipe,
-        user_id=currentUser.id,
-        patch=values,
-    )
+    try:
+        updated = apply_recipe_update(
+            session,
+            existing_recipe,
+            user_id=currentUser.id,
+            patch=values,
+        )
+    except SourceLinkError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     content_keys = {
         "name",
         "description",
@@ -502,6 +529,7 @@ def update_recipe(
         "prep_time",
         "cover_image_id",
         "ingredients",
+        "source_links",
     }
     if content_keys.intersection(values):
         refresh_recipe_embedding(session, updated, commit=True)

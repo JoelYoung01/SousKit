@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ImageUploadDialog from "@/components/ImageUploadDialog.vue";
 import CoverImagePickerDialog from "@/components/CoverImagePickerDialog.vue";
+import SourceLinkEditor from "@/components/recipes/SourceLinkEditor.vue";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import type {
   RecipeCoverOption,
   RecipeCreate,
   RecipeDetail,
+  RecipeSourceLink,
   UploadSlim
 } from "@/types";
 import { ApiError, del, get, getErrorMessage, post, put, toast } from "@/utils";
@@ -77,6 +79,7 @@ watch(
   }
 );
 const ingredientForms = reactive<IngredientForm[]>([]);
+const sourceLinks = ref<RecipeSourceLink[]>([]);
 
 const creating = computed(() => route.name === "recipe-new");
 const coverRecipeKey = computed(() =>
@@ -213,6 +216,7 @@ async function saveChanges() {
 
     const payload = {
       ...form,
+      source_links: sourceLinks.value,
       ingredients: ingredientForms
         .filter((ing) => ing.name)
         .map((ing) => ({
@@ -245,6 +249,10 @@ function fillForms() {
     form[key] = recipeDetail.value[key] ?? null;
   }
   coverPreviewUrl.value = recipeDetail.value.cover_image?.url ?? "";
+  sourceLinks.value = (recipeDetail.value.source_links ?? []).map((link) => ({
+    name: link.name,
+    url: link.url
+  }));
   ingredientForms.splice(0);
   for (const ingredient of recipeDetail.value.ingredients) {
     ingredientForms.push({
@@ -338,6 +346,8 @@ watch(coverRecipeKey, (key) => {
         <Label for="notes">Notes</Label>
         <Textarea id="notes" v-model="form.notes" class="min-h-20 rounded-xl bg-card" />
       </div>
+
+      <SourceLinkEditor :links="sourceLinks" @update:links="sourceLinks = $event" />
 
       <div class="space-y-2">
         <Label for="prep">Prep time (min)</Label>
