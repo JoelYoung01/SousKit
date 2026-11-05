@@ -92,6 +92,13 @@ function isCrossed(item: GroceryItem) {
   return item.dismissed || pendingHideKeys.value.has(item.key);
 }
 
+function itemNotes(item: GroceryItem) {
+  return (item.notes ?? [])
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function clearPending(key: string) {
   const timer = hideTimers.get(key);
   if (timer !== undefined) {
@@ -382,7 +389,10 @@ onUnmounted(() => {
               class="flex w-full items-start gap-3 border border-border px-3 py-3 text-left transition-opacity"
               :class="isCrossed(item) ? 'opacity-55' : ''"
               :aria-pressed="isCrossed(item)"
-              :aria-label="isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`"
+              :aria-label="
+                (isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`) +
+                (itemNotes(item) ? `. ${itemNotes(item)}` : '')
+              "
               @click="onRowTap(item)"
             >
               <Checkbox
@@ -406,6 +416,9 @@ onUnmounted(() => {
                     {{ item.quantity_display }}
                   </p>
                 </div>
+                <p v-if="itemNotes(item)" class="mt-0.5 line-clamp-3 text-[12px] leading-snug">
+                  {{ itemNotes(item) }}
+                </p>
                 <p class="mt-0.5 truncate text-[11.5px] text-muted-foreground">
                   {{ item.recipe_titles }}
                 </p>

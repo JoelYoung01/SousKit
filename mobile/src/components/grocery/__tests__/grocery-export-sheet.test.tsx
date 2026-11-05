@@ -51,6 +51,7 @@ const items: GroceryItem[] = [
     quantity_display: "1 bag",
     recipes: [],
     recipe_titles: "",
+    notes: [],
     source_ingredient_ids: [],
     manual_item_ids: [],
     is_manual: false,

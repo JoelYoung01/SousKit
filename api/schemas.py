@@ -453,6 +453,8 @@ class GroceryItem(BaseModel):
     quantity_display: str
     recipes: list[GroceryRecipeRef]
     recipe_titles: str
+    # Ingredient details from every recipe that contributed this item.
+    notes: list[str] = []
     source_ingredient_ids: list[int]
     manual_item_ids: list[int] = []
     is_manual: bool = False
