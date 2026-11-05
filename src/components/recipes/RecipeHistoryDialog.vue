@@ -54,7 +54,8 @@ const fieldLabels: Record<string, string> = {
   notes: "Notes",
   prep_time: "Prep time",
   cover_image: "Cover image",
-  instructions: "Instructions"
+  instructions: "Instructions",
+  source_links: "Sources"
 };
 
 function kindLabel(version: RecipeVersionSummary) {

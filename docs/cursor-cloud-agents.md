@@ -83,7 +83,9 @@ The admin seed also receives `SUPERUSER_GID` when set.
 
 ## Recipe import from URL
 
-- `POST /api/recipe/import-from-url/` with `{ "url": "https://..." }` (auth required). Fetches the page (SSRF-safe), extracts via `recipe-scrapers` / schema.org first, then falls back to OpenRouter when structured markup is missing and `OPENROUTER_API_KEY` is set. Creates a private recipe + ingredients (optional cover via `IMAGE_GEN_PROVIDER`) and returns `RecipeDetail`.
+- `POST /api/recipe/import-from-url/` with `{ "url": "https://..." }` (auth required). Fetches the page (SSRF-safe), extracts via `recipe-scrapers` / schema.org first, then falls back to OpenRouter when structured markup is missing and `OPENROUTER_API_KEY` is set. Creates a private recipe + ingredients (optional cover via `IMAGE_GEN_PROVIDER`) and returns `RecipeDetail`. The import URL is saved as the first `source_links` entry (site name + URL), not appended to notes.
+- `source_links` is an ordered list of `{name, url}` on the recipe head (and each version). It is stored as a JSON object in `recipe_version.source_links_json` (`{"links":[...]}`). Create/update accept that list; a comma-separated string of URLs is also accepted. `POST /api/recipe/source-links/resolve/` looks up a chip label from the page (`og:site_name`, then the title).
+- Detail pages show the links as tappable chips. The edit page edits the same chips: paste a URL, a comma-separated list, or a site name for the next link. The client tries to read the page itself, then falls back to the resolve endpoint.
 - Social / short-video hosts (Instagram, TikTok, YouTube Shorts, Facebook, etc.) are rejected with a clear 422 — out of scope for v1.
 - UI: web `RecipeImportView` and mobile `recipes/import` — on success navigate to the recipe edit screen for review. Photo scan remains stubbed.
 - Needs outbound HTTPS to the recipe site (and OpenRouter / Openverse when those providers are enabled).

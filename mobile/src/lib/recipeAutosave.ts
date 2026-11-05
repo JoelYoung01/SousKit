@@ -15,6 +15,11 @@ export interface RecipeDraftIngredient {
   details: string | null;
 }
 
+export interface RecipeDraftSourceLink {
+  name: string;
+  url: string;
+}
+
 /** Canonical recipe body. Callers normalize text before passing it in. */
 export interface RecipeDraftPayload {
   name: string;
@@ -24,6 +29,7 @@ export interface RecipeDraftPayload {
   public: boolean;
   prep_time: number | null;
   cover_image_id: number | null;
+  source_links: RecipeDraftSourceLink[];
   ingredients: RecipeDraftIngredient[];
 }
 
@@ -68,6 +74,7 @@ export const LEAVE_WITHOUT_SAVING_MESSAGE = "Leaving without the latest changes.
 function cloneDraft(draft: RecipeDraftPayload): RecipeDraftPayload {
   return {
     ...draft,
+    source_links: draft.source_links.map((link) => ({ ...link })),
     ingredients: draft.ingredients.map((row) => ({ ...row }))
   };
 }
@@ -88,6 +95,7 @@ export class RecipeAutosave {
     public: false,
     prep_time: null,
     cover_image_id: null,
+    source_links: [],
     ingredients: []
   };
   #lastSavedKey = "";

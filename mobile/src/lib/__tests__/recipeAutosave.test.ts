@@ -15,6 +15,7 @@ function draft(overrides: Partial<RecipeDraftPayload> = {}): RecipeDraftPayload 
     public: false,
     prep_time: 20,
     cover_image_id: null,
+    source_links: [],
     ingredients: [{ name: "Onion", amount: 1, units: null, details: null }],
     ...overrides
   };
