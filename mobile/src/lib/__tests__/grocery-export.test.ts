@@ -1,6 +1,8 @@
 import {
   formatGroceryExportLine,
+  formatGroceryItemContextLines,
   formatGroceryListPlainText,
+  formatGroceryNotesLine,
   getExportableGroceryItems
 } from "@/lib/grocery-export";
 import type { GroceryItem } from "@/types";
@@ -12,6 +14,7 @@ function item(partial: Partial<GroceryItem> & Pick<GroceryItem, "key" | "name">)
     quantity_display: "",
     recipes: [],
     recipe_titles: "",
+    notes: [],
     source_ingredient_ids: [],
     manual_item_ids: [],
     is_manual: false,
@@ -47,6 +50,46 @@ describe("formatGroceryExportLine", () => {
   });
 });
 
+describe("formatGroceryNotesLine", () => {
+  it("joins distinct notes and skips blanks", () => {
+    expect(formatGroceryNotesLine([" Roma ", "", "  ", "canned, diced"])).toBe(
+      "Roma · canned, diced"
+    );
+  });
+});
+
+describe("formatGroceryItemContextLines", () => {
+  it("places notes above the source recipe", () => {
+    expect(
+      formatGroceryItemContextLines(
+        item({
+          key: "tomato",
+          name: "Tomato",
+          notes: ["Roma", "canned, diced"],
+          recipe_titles: "Greek Salad, Beef Tacos"
+        })
+      )
+    ).toEqual(["Roma · canned, diced", "Greek Salad, Beef Tacos"]);
+  });
+
+  it("omits the source recipe from plain-text context when there are no notes", () => {
+    expect(
+      formatGroceryItemContextLines(
+        item({ key: "salt", name: "Salt", recipe_titles: "Guacamole" })
+      )
+    ).toEqual([]);
+  });
+
+  it("keeps the source recipe for reminders even without notes", () => {
+    expect(
+      formatGroceryItemContextLines(
+        item({ key: "salt", name: "Salt", recipe_titles: "Guacamole" }),
+        { includeSource: true }
+      )
+    ).toEqual(["Guacamole"]);
+  });
+});
+
 describe("formatGroceryListPlainText", () => {
   it("groups active items by category", () => {
     const text = formatGroceryListPlainText([
@@ -62,5 +105,29 @@ describe("formatGroceryListPlainText", () => {
 
   it("handles an empty active list", () => {
     expect(formatGroceryListPlainText([])).toBe("Grocery\n(No items)");
+  });
+
+  it("puts ingredient notes between the item and its source recipes", () => {
+    const text = formatGroceryListPlainText([
+      item({
+        key: "tomato",
+        name: "Tomato",
+        quantity_display: "3",
+        notes: ["Roma", "canned, diced"],
+        recipe_titles: "Beef Tacos, Greek Salad"
+      })
+    ]);
+
+    expect(text).toBe(
+      [
+        "Grocery",
+        "",
+        "Produce",
+        "- Tomato (3)",
+        "  Roma · canned, diced",
+        "  Beef Tacos, Greek Salad",
+        ""
+      ].join("\n")
+    );
   });
 });

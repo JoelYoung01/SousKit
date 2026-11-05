@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import MetaData, UniqueConstraint
+from sqlalchemy import MetaData, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from api.core.timezone_handler import UTCDateTime
@@ -213,6 +213,15 @@ class Recipe(BaseIndexedDbModel, table=True):
         return list(head.ingredients or [])
 
     @property
+    def source_links(self) -> list[dict[str, str]]:
+        from api.core.source_links import load_source_links
+
+        head = self._head
+        if head is None:
+            return []
+        return load_source_links(head.source_links_json)
+
+    @property
     def head_version_number(self) -> int:
         head = self._head
         return head.version_number if head is not None else 0
@@ -245,6 +254,8 @@ class RecipeVersion(BaseIndexedDbModel, table=True):
     notes: str | None = None
     prep_time: float | None = None
     cover_image_id: int | None = Field(default=None, foreign_key="upload.id")
+    # JSON object {"links": [{"name", "url"}]} — display name is separate from the URL.
+    source_links_json: str | None = Field(default=None, sa_type=Text)
     # create | edit | ai_edit | import | restore
     change_kind: str = Field(max_length=32)
     restored_from_version: int | None = None

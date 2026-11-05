@@ -94,10 +94,24 @@ def _is_bad_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def host_is_blocked_literal(hostname: str) -> bool:
+    """True for localhost and literal private IPs. Does not resolve DNS."""
+    host = (hostname or "").lower().rstrip(".")
+    if not host:
+        return True
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return _is_bad_ip(ip)
+
+
 def _assert_public_host(hostname: str) -> None:
     host = hostname.lower().rstrip(".")
-    if host in {"localhost"} or host.endswith(".localhost") or host.endswith(".local"):
-        raise RecipeImportError("That URL can’t be imported.")
+    if host_is_blocked_literal(host):
+        raise RecipeImportError("That URL can’t be used.")
 
     try:
         # Prefer getaddrinfo so we catch every resolved address family.
@@ -119,16 +133,39 @@ def _assert_public_host(hostname: str) -> None:
         except ValueError:
             continue
         if _is_bad_ip(ip):
-            raise RecipeImportError("That URL can’t be imported.")
+            raise RecipeImportError("That URL can’t be used.")
+
+
+def assert_public_http_url(url: str) -> str:
+    """Validate an http(s) URL. Social hosts are allowed; localhost is not."""
+    raw = (url or "").strip()
+    if not raw:
+        raise RecipeImportError("Enter a URL.")
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise RecipeImportError("URL must start with http:// or https://.")
+    if not parsed.hostname:
+        raise RecipeImportError("That doesn’t look like a valid URL.")
+    if host_is_blocked_literal(parsed.hostname):
+        raise RecipeImportError("That URL can’t be used.")
+    return raw
+
+
+def fetch_public_html(url: str, *, timeout: float = 8.0) -> tuple[str, str]:
+    """Download HTML for a source link. Returns ``(final_url, html)``."""
+    return _download_html(assert_public_http_url(url), timeout=timeout)
 
 
 def fetch_recipe_html(url: str) -> tuple[str, str]:
-    """Download HTML for ``url``. Returns ``(final_url, html)``."""
-    safe_url = assert_supported_recipe_url(url)
+    """Download HTML for a recipe import. Returns ``(final_url, html)``."""
+    return _download_html(assert_supported_recipe_url(url), timeout=FETCH_TIMEOUT)
+
+
+def _download_html(safe_url: str, *, timeout: float) -> tuple[str, str]:
     current = safe_url
 
     with httpx.Client(
-        timeout=FETCH_TIMEOUT,
+        timeout=timeout,
         follow_redirects=False,
         headers={
             "User-Agent": _USER_AGENT,
@@ -139,7 +176,7 @@ def fetch_recipe_html(url: str) -> tuple[str, str]:
         for _ in range(MAX_REDIRECTS + 1):
             parsed = urlparse(current)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
-                raise RecipeImportError("That URL can’t be imported.")
+                raise RecipeImportError("That URL can’t be used.")
             _assert_public_host(parsed.hostname)
 
             try:

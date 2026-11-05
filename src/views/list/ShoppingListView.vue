@@ -123,6 +123,13 @@ function sectionGap(index: number) {
   return index < grouped.value.length - 1 ? GROCERY_SECTION_GAP : 0;
 }
 
+function itemNotes(item: GroceryItem) {
+  return (item.notes ?? [])
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function queueHide(item: GroceryItem) {
   checkoff.noteActivity();
   if (item.dismissed || item.deleted || checkoff.isHeld(item.key)) return;
@@ -475,7 +482,10 @@ onUnmounted(unbindActivity);
                   class="flex w-full items-start gap-3 border border-border px-3 py-3 text-left transition-opacity"
                   :class="isCrossed(item) ? 'opacity-55' : ''"
                   :aria-pressed="isCrossed(item)"
-                  :aria-label="isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`"
+                  :aria-label="
+                    (isCrossed(item) ? `Restore ${item.name}` : `Cross off ${item.name}`) +
+                    (itemNotes(item) ? `. ${itemNotes(item)}` : '')
+                  "
                   @click="onRowTap(item)"
                 >
                   <Checkbox
@@ -499,6 +509,9 @@ onUnmounted(unbindActivity);
                         {{ item.quantity_display }}
                       </p>
                     </div>
+                    <p v-if="itemNotes(item)" class="mt-0.5 line-clamp-3 text-[12px] leading-snug">
+                      {{ itemNotes(item) }}
+                    </p>
                     <p class="mt-0.5 truncate text-[11.5px] text-muted-foreground">
                       {{ item.recipe_titles }}
                     </p>

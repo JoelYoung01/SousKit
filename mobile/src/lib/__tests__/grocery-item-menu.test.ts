@@ -9,6 +9,7 @@ const mockItem: GroceryItem = {
   quantity_display: "2 lbs",
   recipes: [{ id: 9, name: "Roast chicken" }],
   recipe_titles: "Roast chicken",
+  notes: [],
   source_ingredient_ids: [1],
   manual_item_ids: [],
   is_manual: false,

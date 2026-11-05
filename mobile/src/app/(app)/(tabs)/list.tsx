@@ -21,6 +21,7 @@ import { colors } from "@/lib/colors";
 import { GROCERY_HEADER_GAP, GROCERY_ROW_GAP, GROCERY_SECTION_GAP } from "@/lib/grocery-checkoff";
 import { formatShortRange } from "@/lib/dates";
 import { getErrorMessage } from "@/api/errors";
+import { formatGroceryNotesLine } from "@/lib/grocery-export";
 import { showGroceryItemContextMenu } from "@/lib/grocery-item-menu";
 import { tapHaptic } from "@/lib/haptics";
 import { paths } from "@/lib/sitemap";
@@ -476,6 +477,7 @@ export default function GroceryListScreen() {
                 <View>
                   {group.items.map((item) => {
                     const crossed = isCrossed(item);
+                    const notesLine = formatGroceryNotesLine(item.notes);
                     return (
                       <GroceryCollapse
                         key={item.key}
@@ -491,7 +493,9 @@ export default function GroceryListScreen() {
                             accessibilityRole="button"
                             accessibilityState={{ checked: crossed }}
                             accessibilityLabel={
-                              crossed ? `Restore ${item.name}` : `Cross off ${item.name}`
+                              crossed
+                                ? `Restore ${item.name}${notesLine ? `. ${notesLine}` : ""}`
+                                : `Cross off ${item.name}${notesLine ? `. ${notesLine}` : ""}`
                             }
                             onPress={() => onRowTap(item)}
                             onLongPress={() => onRowLongPress(item)}
@@ -528,6 +532,11 @@ export default function GroceryListScreen() {
                                   </Text>
                                 ) : null}
                               </View>
+                              {notesLine ? (
+                                <Text numberOfLines={3} className="mt-0.5 text-xs leading-snug">
+                                  {notesLine}
+                                </Text>
+                              ) : null}
                               {item.recipe_titles ? (
                                 <Text
                                   numberOfLines={1}
