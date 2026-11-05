@@ -93,7 +93,8 @@ export function Sheet({
   children,
   footer,
   className,
-  fullHeight = false
+  fullHeight = false,
+  onActivity
 }: {
   visible: boolean;
   onClose: () => void;
@@ -103,6 +104,8 @@ export function Sheet({
   className?: string;
   /** Stretch to nearly the full screen (minus a small top peek of scrim). */
   fullHeight?: boolean;
+  /** Fires when the user touches the sheet, including the scrim. */
+  onActivity?: () => void;
 }) {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -242,7 +245,7 @@ export function Sheet({
     >
       {/* Modal hosts a separate native root — RNGH needs its own provider. */}
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <View className="flex-1 justify-end">
+        <View className="flex-1 justify-end" onTouchStart={onActivity}>
           <Animated.View
             style={[
               StyleSheet.absoluteFill,
