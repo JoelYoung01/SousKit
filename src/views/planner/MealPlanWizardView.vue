@@ -16,7 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useMealPlanWizardPrefs } from "@/composables/useMealPlanWizardPrefs";
-import { splitInstructionSteps } from "@/lib/instructions";
+import MarkdownBody from "@/components/recipes/MarkdownBody.vue";
+import { markdownToPlain } from "@/lib/markdown";
 import {
   copyPreviousButtonLabel,
   indexMealsByDay,
@@ -1542,9 +1543,11 @@ onUnmounted(() => {
             v-if="draftByDay[dayKey] && expandedHubDays.includes(dayKey)"
             class="space-y-3 border-t border-border px-3.5 pb-3.5 pt-2.5"
           >
-            <p v-if="draftByDay[dayKey]!.description" class="text-sm text-muted-foreground">
-              {{ draftByDay[dayKey]!.description }}
-            </p>
+            <MarkdownBody
+              v-if="draftByDay[dayKey]!.description"
+              :source="draftByDay[dayKey]!.description"
+              size="sm"
+            />
 
             <div v-if="draftByDay[dayKey]!.builtRecipe?.ingredients?.length">
               <p class="text-xs font-semibold uppercase tracking-wide text-faint">Ingredients</p>
@@ -1561,16 +1564,11 @@ onUnmounted(() => {
 
             <div v-if="draftByDay[dayKey]!.builtRecipe?.instructions">
               <p class="text-xs font-semibold uppercase tracking-wide text-faint">Instructions</p>
-              <div class="mt-1.5 space-y-2 text-sm leading-relaxed text-foreground/90">
-                <p
-                  v-for="(step, idx) in splitInstructionSteps(
-                    draftByDay[dayKey]!.builtRecipe!.instructions
-                  )"
-                  :key="idx"
-                >
-                  {{ step }}
-                </p>
-              </div>
+              <MarkdownBody
+                class="mt-1.5"
+                :source="draftByDay[dayKey]!.builtRecipe!.instructions"
+                size="sm"
+              />
             </div>
           </div>
         </div>
@@ -1855,9 +1853,11 @@ onUnmounted(() => {
             v-if="row.recipe && isExpanded(row.day)"
             class="space-y-3 border-t border-border px-3 pb-3 pt-2"
           >
-            <p v-if="row.recipe.description" class="text-sm text-muted-foreground">
-              {{ row.recipe.description }}
-            </p>
+            <MarkdownBody
+              v-if="row.recipe.description"
+              :source="row.recipe.description"
+              size="sm"
+            />
 
             <div v-if="row.recipe.ingredients?.length">
               <p class="text-xs font-semibold uppercase tracking-wide text-faint">Ingredients</p>
@@ -1874,16 +1874,13 @@ onUnmounted(() => {
 
             <div>
               <p class="text-xs font-semibold uppercase tracking-wide text-faint">Instructions</p>
-              <div class="mt-1.5 space-y-2.5 text-sm leading-relaxed text-foreground/90">
-                <p v-for="(step, idx) in splitInstructionSteps(row.recipe.instructions)" :key="idx">
-                  {{ step }}
-                </p>
-              </div>
+              <MarkdownBody class="mt-1.5" :source="row.recipe.instructions" size="sm" />
             </div>
 
-            <p v-if="row.recipe.notes" class="text-xs text-muted-foreground">
-              Notes: {{ row.recipe.notes }}
-            </p>
+            <div v-if="row.recipe.notes">
+              <p class="text-xs font-semibold uppercase tracking-wide text-faint">Notes</p>
+              <MarkdownBody class="mt-1.5" :source="row.recipe.notes" size="sm" />
+            </div>
           </div>
         </div>
       </div>
@@ -2224,7 +2221,7 @@ onUnmounted(() => {
               <span class="min-w-0">
                 <span class="block truncate text-sm font-semibold">{{ recipe.name }}</span>
                 <span class="block truncate text-xs text-muted-foreground">{{
-                  recipe.description
+                  markdownToPlain(recipe.description)
                 }}</span>
               </span>
             </button>

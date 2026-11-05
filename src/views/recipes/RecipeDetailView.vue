@@ -9,7 +9,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { splitInstructionSteps } from "@/lib/instructions";
+import MarkdownBody from "@/components/recipes/MarkdownBody.vue";
 import { formatPrepTime, mediaUrl } from "@/lib/media";
 import { recipeReadPath } from "@/lib/recipePath";
 import { recipeToMarkdown } from "@/lib/recipeMarkdown";
@@ -294,9 +294,7 @@ onMounted(async () => {
 
       <section class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">About</h2>
-        <p class="text-base leading-relaxed text-muted-foreground whitespace-pre-wrap">
-          {{ shown.description }}
-        </p>
+        <MarkdownBody :source="shown.description" />
         <p v-if="recipe.public && owned" class="mt-2 text-xs text-[#4ade80]">
           This recipe is public.
         </p>
@@ -329,19 +327,12 @@ onMounted(async () => {
 
       <section class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">Instructions</h2>
-        <div class="space-y-2.5 font-sans text-base leading-relaxed text-muted-foreground">
-          <p v-for="(step, idx) in splitInstructionSteps(shown.instructions)" :key="idx">
-            {{ step }}
-          </p>
-        </div>
+        <MarkdownBody :source="shown.instructions" />
       </section>
 
       <section v-if="shown.notes" class="mt-5">
         <h2 class="mb-1 text-sm font-semibold">Notes</h2>
-        <pre
-          class="font-sans text-base leading-relaxed whitespace-pre-wrap text-muted-foreground"
-          >{{ shown.notes }}</pre
-        >
+        <MarkdownBody :source="shown.notes" />
       </section>
 
       <div class="mt-8 flex flex-wrap gap-2">

@@ -9,6 +9,7 @@ from recipe_scrapers._exceptions import RecipeScrapersExceptions
 
 from api.core.logging import logger
 from api.core.recipe_import.parse_ingredient import parse_ingredient_line
+from api.core.recipe_markup import enrich_recipe_text
 from api.core.recipe_text import normalize_instruction_newlines
 
 
@@ -110,6 +111,14 @@ def scrape_recipe_html(html: str, *, page_url: str) -> dict[str, Any] | None:
         return None
 
     description = (_safe_call(scraper.description, "") or "").strip()
+    schema = getattr(scraper, "schema", None)
+    schema_data = getattr(schema, "data", None)
+    description, instructions, notes = enrich_recipe_text(
+        soup=getattr(scraper, "soup", None),
+        schema=schema_data if isinstance(schema_data, dict) else None,
+        description=description,
+        instructions=instructions,
+    )
     if not description:
         description = f"Imported recipe: {title}"
 
@@ -122,7 +131,8 @@ def scrape_recipe_html(html: str, *, page_url: str) -> dict[str, Any] | None:
     return {
         "name": title[:200],
         "description": description[:2000],
-        "instructions": instructions[:20000],
+        "instructions": normalize_instruction_newlines(instructions)[:20000],
+        "notes": notes[:2000] if notes else None,
         "prep_time": _prep_time_minutes(scraper),
         "ingredients": ingredients,
         "method": "schema",

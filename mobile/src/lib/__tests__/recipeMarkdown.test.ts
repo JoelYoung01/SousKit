@@ -69,4 +69,18 @@ describe("recipeToMarkdown", () => {
       ].join("\n")
     );
   });
+
+  it("keeps formatted instructions instead of renumbering them", () => {
+    const markdown = recipeToMarkdown({
+      name: "Chili",
+      description: "A **hearty** bowl.",
+      ingredients: [{ name: "beef", amount: 1, units: "lb" }],
+      instructions: "## Cook\n\n1. Brown the **beef**.\n2. Simmer.",
+      notes: "- Rest overnight"
+    });
+
+    expect(markdown).toContain("A **hearty** bowl.");
+    expect(markdown).toContain("## Cook\n\n1. Brown the **beef**.\n2. Simmer.");
+    expect(markdown).toContain("- Rest overnight");
+  });
 });

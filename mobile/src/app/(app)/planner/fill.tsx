@@ -48,7 +48,8 @@ import {
   type MealCopyWindow
 } from "@/lib/duplicateMealPlan";
 import { tapHaptic } from "@/lib/haptics";
-import { splitInstructionSteps } from "@/lib/instructions";
+import { MarkdownBody } from "@/components/MarkdownBody";
+import { markdownToPlain } from "@/lib/markdown";
 import { mediaSource } from "@/lib/media";
 import {
   buildCommitNightsPayload,
@@ -1413,9 +1414,7 @@ export default function MealPlanWizardScreen() {
                     {entry && expanded ? (
                       <View className="gap-3 border-t border-border px-3.5 pb-3.5 pt-2.5">
                         {entry.description ? (
-                          <Text className="text-sm text-muted-foreground">
-                            {entry.description}
-                          </Text>
+                          <MarkdownBody source={entry.description} size="sm" />
                         ) : null}
 
                         {entry.builtRecipe?.ingredients?.length ? (
@@ -1441,18 +1440,11 @@ export default function MealPlanWizardScreen() {
                             <Text className="font-sans-semibold text-xs uppercase tracking-wide text-faint">
                               Instructions
                             </Text>
-                            <View className="mt-1.5 gap-2">
-                              {splitInstructionSteps(entry.builtRecipe.instructions).map(
-                                (step, idx) => (
-                                  <Text
-                                    key={`${dayKey}-step-${idx}`}
-                                    className="text-sm leading-6 text-foreground/90"
-                                  >
-                                    {step}
-                                  </Text>
-                                )
-                              )}
-                            </View>
+                            <MarkdownBody
+                              className="mt-1.5"
+                              source={entry.builtRecipe.instructions}
+                              size="sm"
+                            />
                           </View>
                         ) : null}
                       </View>
@@ -1837,9 +1829,7 @@ export default function MealPlanWizardScreen() {
                     {row.recipe && expanded ? (
                       <View className="gap-3 border-t border-border px-3 pb-3 pt-2">
                         {row.recipe.description ? (
-                          <Text className="text-sm text-muted-foreground">
-                            {row.recipe.description}
-                          </Text>
+                          <MarkdownBody source={row.recipe.description} size="sm" />
                         ) : null}
 
                         {row.recipe.ingredients?.length ? (
@@ -1864,22 +1854,20 @@ export default function MealPlanWizardScreen() {
                           <Text className="font-sans-semibold text-xs uppercase tracking-wide text-faint">
                             Instructions
                           </Text>
-                          <View className="mt-1.5 gap-2.5">
-                            {splitInstructionSteps(row.recipe.instructions).map((step, idx) => (
-                              <Text
-                                key={`${row.recipe!.idea_id}-step-${idx}`}
-                                className="text-sm leading-6 text-foreground/90"
-                              >
-                                {step}
-                              </Text>
-                            ))}
-                          </View>
+                          <MarkdownBody
+                            className="mt-1.5"
+                            source={row.recipe.instructions}
+                            size="sm"
+                          />
                         </View>
 
                         {row.recipe.notes ? (
-                          <Text className="text-xs text-muted-foreground">
-                            Notes: {row.recipe.notes}
-                          </Text>
+                          <View>
+                            <Text className="font-sans-semibold text-xs uppercase tracking-wide text-faint">
+                              Notes
+                            </Text>
+                            <MarkdownBody className="mt-1.5" source={row.recipe.notes} size="sm" />
+                          </View>
                         ) : null}
                       </View>
                     ) : null}
@@ -2283,7 +2271,7 @@ export default function MealPlanWizardScreen() {
                       {recipe.name}
                     </Text>
                     <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                      {recipe.description}
+                      {markdownToPlain(recipe.description)}
                     </Text>
                   </View>
                 </Pressable>

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import MarkdownField from "@/components/recipes/MarkdownField.vue";
 import { mediaUrl } from "@/lib/media";
 import { recipeReadPath } from "@/lib/recipePath";
 import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
@@ -439,30 +439,21 @@ watch(coverRecipeKey, (key) => {
         <Input id="name" v-model="form.name" class="h-11 rounded-xl bg-card" required />
       </div>
 
-      <div class="space-y-2">
-        <Label for="description">Description</Label>
-        <Textarea
-          id="description"
-          v-model="form.description"
-          class="min-h-24 rounded-xl bg-card"
-          required
-        />
-      </div>
-
-      <div class="space-y-2">
-        <Label for="instructions">Instructions</Label>
-        <Textarea
-          id="instructions"
-          v-model="form.instructions"
-          class="min-h-32 rounded-xl bg-card"
-          required
-        />
-      </div>
-
-      <div class="space-y-2">
-        <Label for="notes">Notes</Label>
-        <Textarea id="notes" v-model="form.notes" class="min-h-20 rounded-xl bg-card" />
-      </div>
+      <MarkdownField
+        id="description"
+        v-model="form.description"
+        label="Description"
+        min-height-class="min-h-24"
+        required
+      />
+      <MarkdownField
+        id="instructions"
+        v-model="form.instructions"
+        label="Instructions"
+        min-height-class="min-h-32"
+        required
+      />
+      <MarkdownField id="notes" v-model="form.notes" label="Notes" min-height-class="min-h-20" />
 
       <SourceLinkEditor :links="sourceLinks" @update:links="sourceLinks = $event" />
 

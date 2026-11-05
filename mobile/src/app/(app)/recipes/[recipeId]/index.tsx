@@ -17,7 +17,7 @@ import {
   ingredientHasAmountOrUnits,
   normalizeIngredientDetails
 } from "@/lib/ingredients";
-import { splitInstructionSteps } from "@/lib/instructions";
+import { MarkdownBody } from "@/components/MarkdownBody";
 import { mediaSource } from "@/lib/media";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
 import { useHousehold } from "@/hooks/use-household";
@@ -259,9 +259,7 @@ export default function RecipeDetailScreen() {
               {shown?.description ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">About</Text>
-                  <Text className="text-base leading-6 text-muted-foreground">
-                    {shown.description}
-                  </Text>
+                  <MarkdownBody source={shown.description} />
                 </View>
               ) : null}
 
@@ -307,19 +305,13 @@ export default function RecipeDetailScreen() {
 
               <View className="mt-5">
                 <Text className="mb-1 font-sans-semibold text-sm">Instructions</Text>
-                <View className="gap-2.5">
-                  {splitInstructionSteps(shown?.instructions ?? "").map((step, idx) => (
-                    <Text key={`step-${idx}`} className="text-base leading-6 text-muted-foreground">
-                      {step}
-                    </Text>
-                  ))}
-                </View>
+                <MarkdownBody source={shown?.instructions ?? ""} />
               </View>
 
               {shown?.notes ? (
                 <View className="mt-5">
                   <Text className="mb-1 font-sans-semibold text-sm">Notes</Text>
-                  <Text className="text-base leading-6 text-muted-foreground">{shown.notes}</Text>
+                  <MarkdownBody source={shown.notes} />
                 </View>
               ) : null}
 

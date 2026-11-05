@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownField } from "@/components/MarkdownField";
 import { colors } from "@/lib/colors";
 import {
   COVER_IMAGE_SOURCE_ITEMS,
@@ -542,28 +542,19 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
             <Input value={name} onChangeText={setName} className="h-11 rounded-xl" />
           </View>
 
-          <View className="gap-2">
-            <Label>Description</Label>
-            <Textarea
-              value={description}
-              onChangeText={setDescription}
-              className="min-h-24 rounded-xl"
-            />
-          </View>
-
-          <View className="gap-2">
-            <Label>Instructions</Label>
-            <Textarea
-              value={instructions}
-              onChangeText={setInstructions}
-              className="min-h-32 rounded-xl"
-            />
-          </View>
-
-          <View className="gap-2">
-            <Label>Notes</Label>
-            <Textarea value={notes} onChangeText={setNotes} className="min-h-20 rounded-xl" />
-          </View>
+          <MarkdownField
+            label="Description"
+            value={description}
+            onChangeText={setDescription}
+            minHeightClass="min-h-24"
+          />
+          <MarkdownField
+            label="Instructions"
+            value={instructions}
+            onChangeText={setInstructions}
+            minHeightClass="min-h-32"
+          />
+          <MarkdownField label="Notes" value={notes} onChangeText={setNotes} minHeightClass="min-h-20" />
 
           <SourceLinkEditor links={sourceLinks} onChange={setSourceLinks} />
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from html.parser import HTMLParser
 from typing import Any
 
 from api.core.llm.client import (
@@ -15,55 +13,10 @@ from api.core.llm.client import (
 )
 from api.core.logging import logger
 from api.core.recipe_import.parse_ingredient import parse_ingredient_line
+from api.core.recipe_markup import html_to_markdown
 from api.core.recipe_text import normalize_instruction_newlines
 
 _MAX_TEXT_CHARS = 14_000
-
-
-class _HTMLTextExtractor(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._chunks: list[str] = []
-        self._skip_depth = 0
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        if tag in {"script", "style", "noscript", "svg", "template"}:
-            self._skip_depth += 1
-        if tag in {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
-            self._chunks.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if (
-            tag in {"script", "style", "noscript", "svg", "template"}
-            and self._skip_depth
-        ):
-            self._skip_depth -= 1
-        if tag in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
-            self._chunks.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._skip_depth:
-            return
-        text = data.strip()
-        if text:
-            self._chunks.append(text + " ")
-
-    def get_text(self) -> str:
-        joined = "".join(self._chunks)
-        joined = re.sub(r"[ \t]+", " ", joined)
-        joined = re.sub(r"\n{3,}", "\n\n", joined)
-        return joined.strip()
-
-
-def html_to_text(html: str) -> str:
-    parser = _HTMLTextExtractor()
-    try:
-        parser.feed(html or "")
-        parser.close()
-    except Exception:  # noqa: BLE001
-        # Extremely broken markup — fall back to tag strip.
-        return re.sub(r"<[^>]+>", " ", html or "")
-    return parser.get_text()
 
 
 def _normalize_llm_recipe(parsed: Any) -> dict[str, Any] | None:
@@ -155,7 +108,7 @@ async def extract_recipe_with_llm(
         logger.info("Skipping LLM recipe extract for %s — stub LLM active", page_url)
         return None
 
-    text = html_to_text(html)
+    text = html_to_markdown(html)
     if len(text) < 80:
         return None
     if len(text) > _MAX_TEXT_CHARS:
@@ -163,11 +116,15 @@ async def extract_recipe_with_llm(
 
     system = (
         "You extract cooking recipes from web page text. "
-        "Return a single JSON object only (no markdown) with keys: "
-        "name (string), description (string), instructions (string with numbered "
-        "steps separated by newlines), notes (string|null), prep_time "
-        "(number minutes|null), ingredients (array of objects with name, amount "
-        "number|null, units string|null, details string|null). "
+        "Return a single JSON object only (no Markdown fences) with keys: "
+        "name (string), description (string), instructions (string), "
+        "notes (string|null), prep_time (number minutes|null), ingredients "
+        "(array of objects with name, amount number|null, units string|null, "
+        "details string|null). "
+        "description, instructions, and notes are Markdown. Preserve bold "
+        "(**like this**), italics (*like this*), and lists from the page. "
+        "Put each instruction step on its own line, numbered, and use ## "
+        "headings only for sections such as Sauce or Assembly. "
         'If the page is not a recipe, return {"error":"not_a_recipe"}.'
     )
     user = "IMPORT_RECIPE\n" f"URL: {page_url}\n\n" "PAGE TEXT:\n" f"{text}"

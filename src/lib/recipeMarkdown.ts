@@ -35,8 +35,20 @@ function formatIngredientLine(ingredient: IngredientLike): string {
   return line;
 }
 
+function instructionsKeepMarkdown(instructions: string): boolean {
+  return (
+    /(^|\n)\s{0,3}#{1,3}\s+\S/.test(instructions) ||
+    /\*\*|__/.test(instructions) ||
+    /(^|\n)\s*[-*+]\s+\S/.test(instructions) ||
+    /\[[^\]]+\]\(https?:\/\//.test(instructions)
+  );
+}
+
 function formatInstructionLines(instructions: string): string[] {
-  return splitInstructionSteps(instructions).map((step, index) => {
+  const trimmed = instructions.trim();
+  if (!trimmed) return [];
+  if (instructionsKeepMarkdown(trimmed)) return [trimmed];
+  return splitInstructionSteps(trimmed).map((step, index) => {
     const cleaned = step.replace(/^\d+\.\s*/, "").trim();
     return `${index + 1}. ${cleaned}`;
   });

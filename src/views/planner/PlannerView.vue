@@ -11,6 +11,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { markdownToPlain } from "@/lib/markdown";
 import { addDays, endOfDay, mediaUrl, startOfDay, startOfWeekMonday, toDateKey } from "@/lib/media";
 import { paths } from "@/sitemap";
 import { usePlannerStore } from "@/stores/planner";
@@ -482,7 +483,7 @@ onActivated(() => {
               <span class="min-w-0">
                 <span class="block truncate text-sm font-semibold">{{ recipe.name }}</span>
                 <span class="block truncate text-xs text-muted-foreground">{{
-                  recipe.description
+                  markdownToPlain(recipe.description)
                 }}</span>
               </span>
             </button>

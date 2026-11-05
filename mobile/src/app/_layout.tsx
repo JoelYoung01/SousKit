@@ -7,8 +7,10 @@ import { queryClient } from "@/lib/query-client";
 import { useSessionStore } from "@/stores/session";
 import {
   Figtree_400Regular,
+  Figtree_400Regular_Italic,
   Figtree_500Medium,
   Figtree_600SemiBold,
+  Figtree_600SemiBold_Italic,
   Figtree_700Bold,
   useFonts
 } from "@expo-google-fonts/figtree";
@@ -26,8 +28,10 @@ void SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Figtree_400Regular,
+    Figtree_400Regular_Italic,
     Figtree_500Medium,
     Figtree_600SemiBold,
+    Figtree_600SemiBold_Italic,
     Figtree_700Bold
   });
   const sessionStatus = useSessionStore((s) => s.status);

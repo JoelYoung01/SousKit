@@ -1,4 +1,5 @@
 import { formatPrepTime } from "@/lib/dates";
+import { markdownToPlain } from "@/lib/markdown";
 import { colors } from "@/lib/colors";
 import { tapHaptic } from "@/lib/haptics";
 import { mediaSource } from "@/lib/media";
@@ -35,7 +36,7 @@ export function RecipeCard({ recipe }: { recipe: RecipeCardType }) {
         </Text>
         {recipe.description ? (
           <Text className="mt-0.5 text-sm leading-5 text-muted-foreground" numberOfLines={2}>
-            {recipe.description}
+            {markdownToPlain(recipe.description)}
           </Text>
         ) : null}
         {recipe.prep_time ? (
