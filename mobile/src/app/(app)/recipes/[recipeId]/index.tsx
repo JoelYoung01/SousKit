@@ -3,6 +3,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { RecipeAiEditSheet } from "@/components/RecipeAiEditSheet";
 import { SourceLinkChips } from "@/components/SourceLinkChips";
 import { RecipeHistorySheet } from "@/components/RecipeHistorySheet";
+import { PlanRecipeSheet } from "@/components/recipes/PlanRecipeSheet";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,7 +30,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { ArrowLeft, Copy, Pencil, Sparkles } from "lucide-react-native";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -53,6 +54,7 @@ export default function RecipeDetailScreen() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [preview, setPreview] = useState<RecipeVersionDetail | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   const shown = recipe
     ? preview
@@ -69,9 +71,6 @@ export default function RecipeDetailScreen() {
         }
       : recipe
     : undefined;
-
-  const scrollRef = useRef<ScrollView>(null);
-  const ingredientsY = useRef(0);
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
@@ -125,7 +124,7 @@ export default function RecipeDetailScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      <ScrollView ref={scrollRef} contentContainerClassName="pb-10">
+      <ScrollView contentContainerClassName="pb-10">
         {/* Hero */}
         <View className="h-56 overflow-hidden">
           {recipe ? (
@@ -203,14 +202,8 @@ export default function RecipeDetailScreen() {
                     </Text>
                   </Pressable>
                 </View>
-                <Button
-                  size="sm"
-                  className="shrink-0"
-                  onPress={() =>
-                    scrollRef.current?.scrollTo({ y: ingredientsY.current, animated: true })
-                  }
-                >
-                  Cook
+                <Button size="sm" className="shrink-0" onPress={() => setPlanOpen(true)}>
+                  Plan
                 </Button>
               </View>
 
@@ -279,12 +272,7 @@ export default function RecipeDetailScreen() {
                 </View>
               ) : null}
 
-              <View
-                className="mt-5"
-                onLayout={(e) => {
-                  ingredientsY.current = e.nativeEvent.layout.y + 180;
-                }}
-              >
+              <View className="mt-5">
                 <Text className="mb-2 font-sans-semibold text-sm">Ingredients</Text>
                 <View className="gap-1.5">
                   {(shown?.ingredients ?? []).map((ingredient) => {
@@ -383,6 +371,13 @@ export default function RecipeDetailScreen() {
           recipeId={recipe.id}
           onClose={() => setAiEditOpen(false)}
           onApplied={() => setPreview(null)}
+        />
+      ) : null}
+      {recipe ? (
+        <PlanRecipeSheet
+          visible={planOpen}
+          recipe={{ id: recipe.id, name: shown?.name ?? recipe.name }}
+          onClose={() => setPlanOpen(false)}
         />
       ) : null}
       {recipe ? (
