@@ -1,10 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   EntityTypes,
-  ExpoCalendar,
   getCalendars,
   getRemindersPermissions,
   requestRemindersPermissions,
+  type ExpoCalendar,
   type PermissionResponse
 } from "expo-calendar";
 import { PermissionStatus } from "expo-modules-core";
@@ -49,15 +49,55 @@ function toOption(calendar: ExpoCalendar): ReminderListOption {
   };
 }
 
+/**
+ * EventKit's calendar `type` is the account kind (local, iCloud, Exchange),
+ * not a list purpose, so a grocery list is identified by its name.
+ * Exact "Grocery" / "Groceries" ranks above a name that only contains those words.
+ */
+const EXACT_GROCERY_LIST_NAME = /^(?:grocery|groceries)$/i;
+const GROCERY_LIST_NAME = /\bgrocer(?:y|ies)\b/i;
+
+function reminderListLikelihood(title: string): number {
+  const normalized = title.trim();
+  if (EXACT_GROCERY_LIST_NAME.test(normalized)) return 0;
+  if (GROCERY_LIST_NAME.test(normalized)) return 1;
+  return 2;
+}
+
+export function isLikelyGroceryReminderList(list: Pick<ReminderListOption, "title">): boolean {
+  return reminderListLikelihood(list.title) < 2;
+}
+
+/** Likely grocery lists first, then the rest. Alphabetical within each group. */
+export function orderReminderLists(lists: ReminderListOption[]): ReminderListOption[] {
+  return [...lists].sort((a, b) => {
+    const rank = reminderListLikelihood(a.title) - reminderListLikelihood(b.title);
+    if (rank !== 0) return rank;
+    return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  });
+}
+
+/**
+ * Prefer the list used last time. Otherwise pick the most likely grocery list
+ * (exact "Grocery" / "Groceries" before a name that only contains those words).
+ */
+export function pickReminderListId(
+  lists: ReminderListOption[],
+  lastId: string | null
+): string | null {
+  if (lastId && lists.some((list) => list.id === lastId)) return lastId;
+  const ordered = orderReminderLists(lists);
+  return ordered.find(isLikelyGroceryReminderList)?.id ?? ordered[0]?.id ?? null;
+}
+
 /** Writable Reminders lists on this device (iOS only). */
 export async function listWritableReminderLists(): Promise<ReminderListOption[]> {
   if (!isRemindersExportAvailable()) return [];
 
   const calendars = await getCalendars(EntityTypes.REMINDER);
-  return calendars
-    .filter((calendar) => calendar.allowsModifications)
-    .map(toOption)
-    .sort((a, b) => a.title.localeCompare(b.title));
+  return orderReminderLists(
+    calendars.filter((calendar) => calendar.allowsModifications).map(toOption)
+  );
 }
 
 export async function getLastRemindersListId(): Promise<string | null> {
@@ -98,7 +138,14 @@ export async function pushGroceryItemsToReminders(
     throw new Error("Reminders access is required to export the list.");
   }
 
-  const calendar = await ExpoCalendar.get(listId);
+  // `ExpoCalendar.get` is native `getCalendarById`, which requires calendar
+  // write access even for a Reminders list. This app only requests Reminders
+  // permission, so resolve the list through `getCalendars` instead.
+  const calendars = await getCalendars(EntityTypes.REMINDER);
+  const calendar = calendars.find((item) => item.id === listId);
+  if (!calendar) {
+    throw new Error("That Reminders list is no longer on this device.");
+  }
   if (!calendar.allowsModifications) {
     throw new Error("That Reminders list can’t be modified.");
   }

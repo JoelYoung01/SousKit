@@ -12,6 +12,7 @@ import {
   getLastRemindersListId,
   isRemindersExportAvailable,
   listWritableReminderLists,
+  pickReminderListId,
   pushGroceryItemsToReminders,
   type ReminderListOption
 } from "@/lib/grocery-reminders";
@@ -165,9 +166,7 @@ export function GroceryExportSheet({
         setSelectedListId(null);
         return;
       }
-      const preferred =
-        (lastId && options.find((opt) => opt.id === lastId)?.id) || options[0]?.id || null;
-      setSelectedListId(preferred);
+      setSelectedListId(pickReminderListId(options, lastId));
     } catch (er) {
       setListsError(
         er instanceof Error ? er.message : "Couldn’t load Reminders lists."
