@@ -201,6 +201,8 @@ export interface GroceryItem {
   quantity_display: string;
   recipes: GroceryRecipeRef[];
   recipe_titles: string;
+  /** Ingredient details from any recipe that contributed this item. */
+  notes: string[];
   source_ingredient_ids: number[];
   manual_item_ids: number[];
   is_manual: boolean;

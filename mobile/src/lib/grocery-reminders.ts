@@ -11,6 +11,7 @@ import { PermissionStatus } from "expo-modules-core";
 import { Platform } from "react-native";
 import {
   formatGroceryExportLine,
+  formatGroceryItemContextLines,
   getExportableGroceryItems
 } from "@/lib/grocery-export";
 import type { GroceryItem } from "@/types";
@@ -109,9 +110,10 @@ export async function pushGroceryItemsToReminders(
   }
 
   for (const item of exportable) {
+    const context = formatGroceryItemContextLines(item, { includeSource: true });
     await calendar.createReminder({
       title: formatGroceryExportLine(item),
-      notes: item.recipe_titles || undefined
+      notes: context.length > 0 ? context.join("\n") : undefined
     });
   }
 

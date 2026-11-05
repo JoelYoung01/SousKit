@@ -12,6 +12,31 @@ export function formatGroceryExportLine(item: GroceryItem): string {
   return item.name;
 }
 
+/** Shopping notes joined for a single line under the item title. */
+export function formatGroceryNotesLine(notes: string[] | null | undefined): string {
+  return (notes ?? [])
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Lines that sit under the item title.
+ * Notes come first. The source recipe follows when notes are present, or
+ * whenever `includeSource` is set (Reminders already stores the source there).
+ */
+export function formatGroceryItemContextLines(
+  item: GroceryItem,
+  options?: { includeSource?: boolean }
+): string[] {
+  const lines: string[] = [];
+  const notes = formatGroceryNotesLine(item.notes);
+  if (notes) lines.push(notes);
+  const source = item.recipe_titles?.trim();
+  if (source && (options?.includeSource || notes)) lines.push(source);
+  return lines;
+}
+
 /**
  * Plain-text grocery list grouped by category, suitable for clipboard paste
  * into Notes, Messages, Reminders (manual), etc.
@@ -39,6 +64,9 @@ export function formatGroceryListPlainText(
     sections.push(category);
     for (const item of categoryItems) {
       sections.push(`- ${formatGroceryExportLine(item)}`);
+      for (const line of formatGroceryItemContextLines(item)) {
+        sections.push(`  ${line}`);
+      }
     }
     sections.push("");
   }

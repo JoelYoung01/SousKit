@@ -34,6 +34,7 @@ const sampleItem: GroceryItem = {
   quantity_display: "1 qt",
   recipes: [],
   recipe_titles: "Pancakes",
+  notes: [],
   source_ingredient_ids: [],
   manual_item_ids: [],
   is_manual: false,
@@ -89,6 +90,27 @@ describe("pushGroceryItemsToReminders", () => {
     expect(createReminder).toHaveBeenCalledWith({
       title: "Milk (1 qt)",
       notes: "Pancakes"
+    });
+  });
+
+  it("puts ingredient notes above the source recipe", async () => {
+    Calendar.getRemindersPermissions.mockResolvedValue({ granted: true });
+    const createReminder = jest.fn().mockResolvedValue({ id: "r1" });
+    Calendar.ExpoCalendar.get.mockResolvedValue({
+      id: "list-1",
+      title: "Groceries",
+      allowsModifications: true,
+      createReminder
+    });
+
+    await pushGroceryItemsToReminders(
+      [{ ...sampleItem, notes: ["whole", "not skim"] }],
+      "list-1"
+    );
+
+    expect(createReminder).toHaveBeenCalledWith({
+      title: "Milk (1 qt)",
+      notes: "whole · not skim\nPancakes"
     });
   });
 

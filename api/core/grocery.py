@@ -166,6 +166,33 @@ def normalize_item_key(name: str) -> str:
     return re.sub(r"\s+", " ", key)
 
 
+def normalize_item_note(details: str | None) -> str | None:
+    """Collapse an ingredient detail into one grocery note, or None when blank.
+
+    Outer parentheses are stripped so ``(Roma)`` and ``Roma`` display once.
+    """
+    if details is None:
+        return None
+    text = re.sub(r"\s+", " ", details).strip()
+    while len(text) >= 2 and text.startswith("(") and text.endswith(")"):
+        inner = text[1:-1].strip()
+        if not inner:
+            return None
+        text = inner
+    return text or None
+
+
+def _remember_note(bucket: dict, details: str | None) -> None:
+    note = normalize_item_note(details)
+    if not note:
+        return
+    key = note.casefold()
+    if key in bucket["note_keys"]:
+        return
+    bucket["note_keys"].add(key)
+    bucket["notes"].append(note)
+
+
 def infer_category(name: str) -> str:
     lowered = name.lower()
     for category, keywords in _CATEGORY_KEYWORDS:
@@ -233,6 +260,8 @@ def _build_planned_buckets(planned: list[PlannedRecipe]) -> dict[str, dict]:
                     "latest_planned_for": plan.planned_for,
                     "manual_item_ids": [],
                     "is_manual": False,
+                    "notes": [],
+                    "note_keys": set(),
                 }
                 buckets[key] = bucket
             else:
@@ -258,6 +287,7 @@ def _build_planned_buckets(planned: list[PlannedRecipe]) -> dict[str, dict]:
             if recipe.id not in bucket["recipes"]:
                 bucket["recipes"][recipe.id] = recipe.name
             bucket["source_ingredient_ids"].append(ingredient.id)
+            _remember_note(bucket, getattr(ingredient, "details", None))
 
     return buckets
 
@@ -281,6 +311,8 @@ def merge_manual_grocery_items(
                 "latest_planned_for": None,
                 "manual_item_ids": [],
                 "is_manual": True,
+                "notes": [],
+                "note_keys": set(),
             }
             buckets[key] = bucket
 
@@ -331,6 +363,7 @@ def _finalize_buckets(buckets: dict[str, dict]) -> list[dict]:
             if recipes
             else ("Added manually" if bucket["is_manual"] else "")
         )
+        notes = sorted(bucket["notes"], key=str.casefold)
         items.append(
             {
                 "key": bucket["key"],
@@ -340,6 +373,7 @@ def _finalize_buckets(buckets: dict[str, dict]) -> list[dict]:
                 "quantity_display": ", ".join(quantity_parts),
                 "recipes": recipes,
                 "recipe_titles": recipe_titles,
+                "notes": notes,
                 "source_ingredient_ids": bucket["source_ingredient_ids"],
                 "latest_planned_for": bucket["latest_planned_for"],
                 "manual_item_ids": bucket["manual_item_ids"],
