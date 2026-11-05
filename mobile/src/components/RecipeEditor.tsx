@@ -22,12 +22,20 @@ import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
 import { normalizeCoverOption, normalizeUpload } from "@/lib/coverMedia";
 import { tapHaptic } from "@/lib/haptics";
 import { mediaSource } from "@/lib/media";
+import {
+  LEAVE_WITHOUT_SAVING_MESSAGE,
+  RecipeAutosave,
+  isSavableRecipeDraft,
+  recipeAutosaveStatusLabel,
+  unsavedDraftMessage,
+  type RecipeDraftPayload
+} from "@/lib/recipeAutosave";
 import { syncAfterRecipeMutation } from "@/hooks/sync";
 import type { RecipeCoverOption, RecipeDetail, UploadSlim } from "@/types";
 import { toast } from "@/stores/toast";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import {
   Camera,
   ChevronRight,
@@ -37,8 +45,8 @@ import {
   Sparkles,
   Trash2
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
-import { KeyboardAwareScrollView, KeyboardStickyView } from "@/components/ui/keyboard";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardAwareScrollView } from "@/components/ui/keyboard";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -62,12 +70,14 @@ function parseAmount(value: string): number | null {
 /** Create/edit recipe form — port of the web RecipeEditView. */
 export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const creating = recipeId === undefined;
 
   const [detail, setDetail] = useState<RecipeDetail | null>(null);
   const [loading, setLoading] = useState(!creating);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<RecipeAutosave["status"]>("idle");
+  const [leaving, setLeaving] = useState(false);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -138,14 +148,70 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
     };
   }, [creating, recipeId]);
 
-  const validForm =
-    name.trim() &&
-    description.trim() &&
-    instructions.trim() &&
-    ingredients.length > 0 &&
-    ingredients.every((i) => i.name.trim());
-  const canSave = Boolean(validForm) && !saving && !loading;
-  const canGenerateCover = Boolean(name.trim()) && !generatingCover && !saving && !loading;
+  const draft = useMemo<RecipeDraftPayload>(
+    () => ({
+      name: name.trim(),
+      description: description.trim(),
+      instructions: instructions.trim(),
+      notes: notes.trim() || null,
+      public: isPublic,
+      prep_time: parseAmount(prepTime),
+      cover_image_id: coverImageId,
+      ingredients: ingredients
+        .map((row) => ({
+          name: row.name.trim(),
+          amount: parseAmount(row.amount),
+          units: row.units.trim() || null,
+          details: row.details.trim() || null
+        }))
+        .filter((row) => row.name.length > 0)
+    }),
+    [name, description, instructions, notes, isPublic, prepTime, coverImageId, ingredients]
+  );
+  const savable = isSavableRecipeDraft(draft);
+  const canGenerateCover = Boolean(name.trim()) && !generatingCover && !loading;
+
+  const [autosave] = useState(() => new RecipeAutosave());
+  const didBaseline = useRef(false);
+  const allowLeave = useRef(false);
+  const leavingRef = useRef(false);
+  const giveUp = useRef(false);
+  const savableRef = useRef(savable);
+
+  useEffect(() => {
+    savableRef.current = savable;
+  }, [savable]);
+
+  useEffect(() => autosave.subscribe(setSaveStatus), [autosave]);
+
+  useEffect(() => {
+    autosave.bindSave(async (id, body) => {
+      try {
+        if (id == null) {
+          const created = await createRecipe(body);
+          syncAfterRecipeMutation();
+          return created.id;
+        }
+        await updateRecipe(id, body);
+        syncAfterRecipeMutation();
+        return id;
+      } catch (error) {
+        toast.fromError(error, "Couldn’t save this recipe.");
+        throw error;
+      }
+    });
+  }, [autosave]);
+
+  const autosaveEnabled = creating || (!loading && detail !== null);
+  useEffect(() => {
+    if (!autosaveEnabled) return;
+    if (!didBaseline.current) {
+      didBaseline.current = true;
+      autosave.baseline(draft, detail?.id ?? null);
+      return;
+    }
+    autosave.setSnapshot(draft);
+  }, [autosave, autosaveEnabled, draft, detail]);
 
   const uploadCoverAsset = async (asset: PickedImage, successMessage?: string) => {
     setUploadingCover(true);
@@ -256,7 +322,8 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   };
 
   const applyCover = (upload: RecipeCoverOption | UploadSlim) => {
-    const normalized = "skip_key" in upload ? normalizeCoverOption(upload) : normalizeUpload(upload);
+    const normalized =
+      "skip_key" in upload ? normalizeCoverOption(upload) : normalizeUpload(upload);
     if (!normalized.url) {
       setCoverError("Could not load the selected cover image.");
       return;
@@ -343,196 +410,216 @@ export function RecipeEditor({ recipeId }: { recipeId?: string }) {
     setIngredients((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
-  const goBack = () => {
+  const requestLeave = () => {
     if (router.canGoBack()) router.back();
     else router.replace(creating ? "/home" : (`/recipes/${recipeId}` as never));
   };
 
-  const saveChanges = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    try {
-      const body = {
-        name: name.trim(),
-        description: description.trim(),
-        instructions: instructions.trim(),
-        notes: notes.trim() || null,
-        public: isPublic,
-        prep_time: prepTime.trim() ? Number(prepTime) : null,
-        cover_image_id: coverImageId,
-        ingredients: ingredients
-          .filter((i) => i.name.trim())
-          .map((i) => ({
-            name: i.name.trim(),
-            amount: parseAmount(i.amount),
-            units: i.units.trim() || null,
-            details: i.details.trim() || null
-          }))
-      };
-      if (creating) await createRecipe(body);
-      else if (detail) await updateRecipe(detail.id, body);
-      syncAfterRecipeMutation();
-      toast.success(creating ? "Recipe created." : "Recipe saved.");
-      goBack();
-    } catch (er) {
-      toast.fromError(er, "Couldn’t save this recipe.");
-    } finally {
-      setSaving(false);
-    }
-  };
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      if (allowLeave.current) return;
+      event.preventDefault();
+      if (leavingRef.current) return;
+      leavingRef.current = true;
+      setLeaving(true);
+      void (async () => {
+        try {
+          if (giveUp.current && autosave.status === "error") {
+            toast.error(LEAVE_WITHOUT_SAVING_MESSAGE);
+            allowLeave.current = true;
+            navigation.dispatch(event.data.action);
+            return;
+          }
+          const ok = await autosave.flush();
+          if (!ok) {
+            giveUp.current = true;
+            return;
+          }
+          if (autosave.isDirty() && !savableRef.current) {
+            toast.error(unsavedDraftMessage(autosave.persistedId != null));
+          }
+          allowLeave.current = true;
+          navigation.dispatch(event.data.action);
+        } finally {
+          leavingRef.current = false;
+          setLeaving(false);
+        }
+      })();
+    });
+    return unsubscribe;
+  }, [autosave, navigation]);
 
   return (
     <View className="flex-1 bg-background">
       <View style={{ paddingTop: insets.top }}>
-        <ScreenHeader title={creating ? "New recipe" : "Edit recipe"} onBack={goBack} />
+        <ScreenHeader
+          title={creating ? "New recipe" : "Edit recipe"}
+          detail={recipeAutosaveStatusLabel(saveStatus) || undefined}
+          detailTone={saveStatus === "error" ? "danger" : "muted"}
+          onBack={requestLeave}
+          right={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              accessibilityState={{ disabled: leaving }}
+              disabled={leaving}
+              onPress={() => {
+                tapHaptic();
+                requestLeave();
+              }}
+              className={`h-10 items-center justify-center rounded-lg px-1 active:opacity-70 ${leaving ? "opacity-50" : ""}`}
+            >
+              <Text className="font-sans-semibold text-sm text-primary">Done</Text>
+            </Pressable>
+          }
+        />
       </View>
 
-      <KeyboardAwareScrollView
-        className="flex-1"
-        contentContainerClassName="gap-4 px-4 pb-6 pt-2"
-        keyboardShouldPersistTaps="handled"
-        bottomOffset={96}
-      >
-        {/* Cover image */}
-        <View className="gap-2">
-          {coverPreviewUrl ? (
-            <Image
-              source={mediaSource(coverPreviewUrl)}
-              style={{ width: "100%", height: 160, borderRadius: 14 }}
-              contentFit="cover"
-            />
-          ) : null}
-          <View className="flex-row flex-wrap items-center gap-2">
-            <Button variant="secondary" onPress={openCoverSourceMenu} disabled={uploadingCover}>
-              {uploadingCover ? (
-                <Spinner size="small" />
-              ) : (
-                <ImagePlus size={16} color={colors.foreground} />
-              )}
-              {uploadingCover ? "Uploading…" : "Upload photo"}
-            </Button>
-            <Button variant="secondary" onPress={generateCover} disabled={!canGenerateCover}>
-              {generatingCover ? (
-                <Spinner size="small" />
-              ) : (
-                <Sparkles size={16} color={colors.green500} />
-              )}
-              {generatingCover ? "Generating…" : "Generate image"}
-            </Button>
-          </View>
-          <Text className="text-xs leading-4 text-muted-foreground">
-            Upload a photo by taking a picture, choosing from your camera roll, or pasting an image
-            copied to your clipboard.
-          </Text>
-          {coverError ? <Text className="text-sm text-destructive">{coverError}</Text> : null}
+      {loading ? (
+        <View className="flex-1 items-center justify-center">
+          <Spinner />
         </View>
-
-        <View className="gap-2">
-          <Label>Name</Label>
-          <Input value={name} onChangeText={setName} className="h-11 rounded-xl" />
-        </View>
-
-        <View className="gap-2">
-          <Label>Description</Label>
-          <Textarea
-            value={description}
-            onChangeText={setDescription}
-            className="min-h-24 rounded-xl"
-          />
-        </View>
-
-        <View className="gap-2">
-          <Label>Instructions</Label>
-          <Textarea
-            value={instructions}
-            onChangeText={setInstructions}
-            className="min-h-32 rounded-xl"
-          />
-        </View>
-
-        <View className="gap-2">
-          <Label>Notes</Label>
-          <Textarea value={notes} onChangeText={setNotes} className="min-h-20 rounded-xl" />
-        </View>
-
-        <View className="gap-2">
-          <Label>Prep time (min)</Label>
-          <Input
-            value={prepTime}
-            onChangeText={setPrepTime}
-            keyboardType="number-pad"
-            className="h-11 rounded-xl"
-          />
-        </View>
-
-        <View className="flex-row items-center justify-between">
-          <Text className="font-sans-semibold text-sm">Ingredients</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add ingredient"
-            onPress={() => setIngredients((rows) => [...rows, emptyIngredient()])}
-            className="h-9 w-9 items-center justify-center rounded-lg active:bg-secondary"
-          >
-            <Plus size={16} color={colors.foreground} />
-          </Pressable>
-        </View>
-
-        {ingredients.map((ingredient, index) => (
-          <View key={ingredient.id ?? `new-${index}`} className="gap-1.5">
-            <View className="flex-row gap-1.5">
-              <Input
-                value={ingredient.name}
-                onChangeText={(v) => setIngredient(index, { name: v })}
-                placeholder="Name"
-                className="h-9 flex-1 rounded-lg text-xs"
+      ) : detail || creating ? (
+        <KeyboardAwareScrollView
+          className="flex-1"
+          contentContainerClassName="gap-4 px-4 pt-2"
+          contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+          keyboardShouldPersistTaps="handled"
+          bottomOffset={24}
+        >
+          {/* Cover image */}
+          <View className="gap-2">
+            {coverPreviewUrl ? (
+              <Image
+                source={mediaSource(coverPreviewUrl)}
+                style={{ width: "100%", height: 160, borderRadius: 14 }}
+                contentFit="cover"
               />
-              <Input
-                value={ingredient.amount}
-                onChangeText={(v) => setIngredient(index, { amount: v })}
-                placeholder="Amt"
-                keyboardType="decimal-pad"
-                className="h-9 w-[4.5rem] rounded-lg text-xs"
-              />
-              <Input
-                value={ingredient.units}
-                onChangeText={(v) => setIngredient(index, { units: v })}
-                placeholder="Unit"
-                className="h-9 w-16 rounded-lg text-xs"
-              />
-            </View>
-            <View className="flex-row gap-1.5">
-              <Input
-                value={ingredient.details}
-                onChangeText={(v) => setIngredient(index, { details: v })}
-                placeholder="Details"
-                className="h-9 flex-1 rounded-lg text-xs"
-              />
-              <Button
-                size="icon-sm"
-                variant="destructive"
-                accessibilityLabel="Remove ingredient"
-                onPress={() => setIngredients((rows) => rows.filter((_, i) => i !== index))}
-              >
-                <Trash2 size={14} color={colors.foreground} />
+            ) : null}
+            <View className="flex-row flex-wrap items-center gap-2">
+              <Button variant="secondary" onPress={openCoverSourceMenu} disabled={uploadingCover}>
+                {uploadingCover ? (
+                  <Spinner size="small" />
+                ) : (
+                  <ImagePlus size={16} color={colors.foreground} />
+                )}
+                {uploadingCover ? "Uploading…" : "Upload photo"}
+              </Button>
+              <Button variant="secondary" onPress={generateCover} disabled={!canGenerateCover}>
+                {generatingCover ? (
+                  <Spinner size="small" />
+                ) : (
+                  <Sparkles size={16} color={colors.green500} />
+                )}
+                {generatingCover ? "Generating…" : "Generate image"}
               </Button>
             </View>
+            <Text className="text-xs leading-4 text-muted-foreground">
+              Upload a photo by taking a picture, choosing from your camera roll, or pasting an
+              image copied to your clipboard.
+            </Text>
+            {coverError ? <Text className="text-sm text-destructive">{coverError}</Text> : null}
           </View>
-        ))}
-      </KeyboardAwareScrollView>
 
-      <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-        <View
-          className="flex-row gap-2 border-t border-border bg-background px-4 pt-3"
-          style={{ paddingBottom: insets.bottom + 16 }}
-        >
-          <Button variant="outline" className="flex-1 bg-card" disabled={saving} onPress={goBack}>
-            Cancel
-          </Button>
-          <Button className="flex-1" disabled={!canSave} onPress={saveChanges}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
+          <View className="gap-2">
+            <Label>Name</Label>
+            <Input value={name} onChangeText={setName} className="h-11 rounded-xl" />
+          </View>
+
+          <View className="gap-2">
+            <Label>Description</Label>
+            <Textarea
+              value={description}
+              onChangeText={setDescription}
+              className="min-h-24 rounded-xl"
+            />
+          </View>
+
+          <View className="gap-2">
+            <Label>Instructions</Label>
+            <Textarea
+              value={instructions}
+              onChangeText={setInstructions}
+              className="min-h-32 rounded-xl"
+            />
+          </View>
+
+          <View className="gap-2">
+            <Label>Notes</Label>
+            <Textarea value={notes} onChangeText={setNotes} className="min-h-20 rounded-xl" />
+          </View>
+
+          <View className="gap-2">
+            <Label>Prep time (min)</Label>
+            <Input
+              value={prepTime}
+              onChangeText={setPrepTime}
+              keyboardType="number-pad"
+              className="h-11 rounded-xl"
+            />
+          </View>
+
+          <View className="flex-row items-center justify-between">
+            <Text className="font-sans-semibold text-sm">Ingredients</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add ingredient"
+              onPress={() => setIngredients((rows) => [...rows, emptyIngredient()])}
+              className="h-9 w-9 items-center justify-center rounded-lg active:bg-secondary"
+            >
+              <Plus size={16} color={colors.foreground} />
+            </Pressable>
+          </View>
+
+          {ingredients.map((ingredient, index) => (
+            <View key={ingredient.id ?? `new-${index}`} className="gap-1.5">
+              <View className="flex-row gap-1.5">
+                <Input
+                  value={ingredient.name}
+                  onChangeText={(v) => setIngredient(index, { name: v })}
+                  placeholder="Name"
+                  className="h-9 flex-1 rounded-lg text-xs"
+                />
+                <Input
+                  value={ingredient.amount}
+                  onChangeText={(v) => setIngredient(index, { amount: v })}
+                  placeholder="Amt"
+                  keyboardType="decimal-pad"
+                  className="h-9 w-[4.5rem] rounded-lg text-xs"
+                />
+                <Input
+                  value={ingredient.units}
+                  onChangeText={(v) => setIngredient(index, { units: v })}
+                  placeholder="Unit"
+                  className="h-9 w-16 rounded-lg text-xs"
+                />
+              </View>
+              <View className="flex-row gap-1.5">
+                <Input
+                  value={ingredient.details}
+                  onChangeText={(v) => setIngredient(index, { details: v })}
+                  placeholder="Details"
+                  className="h-9 flex-1 rounded-lg text-xs"
+                />
+                <Button
+                  size="icon-sm"
+                  variant="destructive"
+                  accessibilityLabel="Remove ingredient"
+                  onPress={() => setIngredients((rows) => rows.filter((_, i) => i !== index))}
+                >
+                  <Trash2 size={14} color={colors.foreground} />
+                </Button>
+              </View>
+            </View>
+          ))}
+        </KeyboardAwareScrollView>
+      ) : (
+        <View className="flex-1 items-center justify-center px-6">
+          <Text className="text-center text-sm text-muted-foreground">
+            Couldn’t load this recipe.
+          </Text>
         </View>
-      </KeyboardStickyView>
+      )}
 
       <Sheet visible={uploadMenuOpen} onClose={() => setUploadMenuOpen(false)}>
         <Text className="px-1 pb-2 font-sans-semibold text-base">Upload recipe photo</Text>

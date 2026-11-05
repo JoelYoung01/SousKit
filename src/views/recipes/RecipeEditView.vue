@@ -9,6 +9,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { mediaUrl } from "@/lib/media";
 import { recipeReadPath } from "@/lib/recipePath";
 import { loadCoverSkipKeys, rememberCoverSkipKey } from "@/lib/coverSkip";
+import {
+  LEAVE_WITHOUT_SAVING_MESSAGE,
+  RecipeAutosave,
+  isSavableRecipeDraft,
+  recipeAutosaveStatusLabel,
+  recipeDraftKey,
+  unsavedDraftMessage,
+  type RecipeAutosaveStatus,
+  type RecipeDraftPayload
+} from "@/lib/recipeAutosave";
 import { paths } from "@/sitemap";
 import { syncAfterRecipeMutation } from "@/stores/sync";
 import type {
@@ -21,10 +31,28 @@ import type {
 } from "@/types";
 import { ApiError, del, get, getErrorMessage, post, put, toast } from "@/utils";
 import { LoaderCircle, Plus, Sparkles, Trash2 } from "@lucide/vue";
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { isNavigationFailure, onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 
 type IngredientForm = Partial<IngredientCreate> & { id?: number };
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asOptionalText(value: unknown): string | null {
+  const text = asText(value);
+  return text.length > 0 ? text : null;
+}
+
+function asAmount(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 const router = useRouter();
 const route = useRoute();
@@ -38,8 +66,11 @@ const defaultIngredient: IngredientForm = {
 };
 
 const recipeDetail = ref<RecipeDetail>();
-const saving = ref(false);
-const loading = ref(false);
+const loading = ref(route.name !== "recipe-new");
+const ready = ref(false);
+const leaving = ref(false);
+const saveStatus = ref<RecipeAutosaveStatus>("idle");
+const leaveFailures = ref(0);
 const generatingCover = ref(false);
 const coverError = ref("");
 const coverOptions = ref<RecipeCoverOption[]>([]);
@@ -48,9 +79,16 @@ const coverPreviewUrl = ref<string>("");
 const coverSkipKeys = ref<string[]>([]);
 const dismissingCoverId = ref<number | null>(null);
 
+const autosave = new RecipeAutosave();
+const stopStatus = autosave.subscribe((status) => {
+  saveStatus.value = status;
+});
+onBeforeUnmount(stopStatus);
+
 const coverPreviewSrc = computed(() =>
   coverPreviewUrl.value ? mediaUrl(coverPreviewUrl.value) : ""
 );
+const statusLabel = computed(() => recipeAutosaveStatusLabel(saveStatus.value));
 
 const form = reactive<Partial<RecipeCreate>>({
   name: undefined,
@@ -78,6 +116,24 @@ watch(
 );
 const ingredientForms = reactive<IngredientForm[]>([]);
 
+const draft = computed<RecipeDraftPayload>(() => ({
+  name: asText(form.name),
+  description: asText(form.description),
+  instructions: asText(form.instructions),
+  notes: asOptionalText(form.notes),
+  public: Boolean(form.public),
+  prep_time: asAmount(form.prep_time),
+  cover_image_id: typeof form.cover_image_id === "number" ? form.cover_image_id : null,
+  ingredients: ingredientForms
+    .map((row) => ({
+      name: asText(row.name),
+      amount: asAmount(row.amount),
+      units: asOptionalText(row.units),
+      details: asOptionalText(row.details)
+    }))
+    .filter((row) => row.name.length > 0)
+}));
+
 const creating = computed(() => route.name === "recipe-new");
 const coverRecipeKey = computed(() =>
   creating.value ? "new" : String(route.params.recipeId ?? "new")
@@ -99,19 +155,71 @@ const returnUrl = computed(() => {
   return url;
 });
 
-const validForm = computed(
-  () =>
-    form.name &&
-    form.description &&
-    form.instructions &&
-    ingredientForms.length > 0 &&
-    ingredientForms.every((ing) => ing.name)
-);
-const canSave = computed(() => !!validForm.value && !saving.value && !loading.value);
-
 const canGenerateCover = computed(
-  () => Boolean(form.name?.trim()) && !generatingCover.value && !saving.value && !loading.value
+  () => Boolean(form.name?.trim()) && !generatingCover.value && !loading.value
 );
+
+autosave.bindSave(async (id, body) => {
+  try {
+    if (id == null) {
+      const created = await post<RecipeDetail>("/recipe/", body);
+      syncAfterRecipeMutation();
+      return created.id;
+    }
+    await put(`/recipe/${id}/`, body);
+    syncAfterRecipeMutation();
+    return id;
+  } catch (error) {
+    console.error(error);
+    toast.fromError(error, "Couldn’t save this recipe.");
+    throw error;
+  }
+});
+
+// `null` means the editor is still loading. The first real key is the baseline.
+watch(
+  () => (ready.value ? recipeDraftKey(draft.value) : null),
+  (_key, previous) => {
+    if (!ready.value) return;
+    if (previous == null) {
+      autosave.baseline(draft.value, recipeDetail.value?.id ?? null);
+      return;
+    }
+    autosave.setSnapshot(draft.value);
+  }
+);
+
+function saveNow() {
+  void autosave.flush();
+}
+
+async function done() {
+  if (leaving.value) return;
+  leaving.value = true;
+  try {
+    await router.push(returnUrl.value);
+  } catch (error) {
+    if (!isNavigationFailure(error)) throw error;
+  } finally {
+    leaving.value = false;
+  }
+}
+
+onBeforeRouteLeave(async () => {
+  if (leaveFailures.value >= 1 && saveStatus.value === "error") {
+    toast.error(LEAVE_WITHOUT_SAVING_MESSAGE);
+    return true;
+  }
+  const saved = await autosave.flush();
+  if (!saved) {
+    leaveFailures.value = 1;
+    return false;
+  }
+  if (autosave.isDirty() && !isSavableRecipeDraft(draft.value)) {
+    toast.error(unsavedDraftMessage(autosave.persistedId != null));
+  }
+  return true;
+});
 
 async function generateCoverImage() {
   if (!canGenerateCover.value || !form.name?.trim()) return;
@@ -194,6 +302,7 @@ async function getRecipeDetails() {
   try {
     recipeDetail.value = await get(recipeReadPath(String(route.params.recipeId)));
     fillForms();
+    ready.value = true;
   } catch (er) {
     if ((er as ApiError).status === 404) {
       router.push({ name: "not-found" });
@@ -203,39 +312,6 @@ async function getRecipeDetails() {
     }
   }
   loading.value = false;
-}
-
-async function saveChanges() {
-  if (saving.value || !canSave.value) return;
-  saving.value = true;
-  try {
-    if (!form.prep_time && form.prep_time !== 0) form.prep_time = undefined;
-
-    const payload = {
-      ...form,
-      ingredients: ingredientForms
-        .filter((ing) => ing.name)
-        .map((ing) => ({
-          name: ing.name,
-          amount: ing.amount ?? null,
-          units: ing.units || null,
-          details: ing.details || null
-        }))
-    };
-    if (creating.value) {
-      await post(`/recipe/`, payload);
-    } else if (recipeDetail.value) {
-      await put(`/recipe/${recipeDetail.value.id}/`, payload);
-    }
-
-    syncAfterRecipeMutation();
-    toast.success(creating.value ? "Recipe created." : "Recipe saved.");
-    router.push(returnUrl.value);
-  } catch (er) {
-    console.error(er);
-    toast.fromError(er, "Couldn’t save this recipe.");
-  }
-  saving.value = false;
 }
 
 function fillForms() {
@@ -267,8 +343,12 @@ function removeIngredient(index: number) {
 
 onMounted(() => {
   coverSkipKeys.value = loadCoverSkipKeys(coverRecipeKey.value);
-  if (creating.value && ingredientForms.length === 0) addIngredient();
-  getRecipeDetails();
+  if (creating.value) {
+    if (ingredientForms.length === 0) addIngredient();
+    ready.value = true;
+  } else {
+    void getRecipeDetails();
+  }
 });
 
 watch(coverRecipeKey, (key) => {
@@ -277,10 +357,45 @@ watch(coverRecipeKey, (key) => {
 </script>
 
 <template>
-  <div class="px-4 pt-5 pb-24">
-    <h1 class="text-xl font-bold">{{ creating ? "New recipe" : "Edit recipe" }}</h1>
+  <div>
+    <header
+      class="sticky top-0 z-20 flex items-center border-b border-border/80 bg-background/95 px-2 py-1.5 backdrop-blur-sm"
+    >
+      <div class="w-16 shrink-0" aria-hidden="true" />
+      <div class="min-w-0 flex-1 text-center">
+        <h1 class="truncate text-base font-semibold">
+          {{ creating ? "New recipe" : "Edit recipe" }}
+        </h1>
+        <p
+          v-if="statusLabel"
+          class="truncate text-[11px]"
+          :class="saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+          aria-live="polite"
+        >
+          {{ statusLabel }}
+        </p>
+      </div>
+      <div class="flex w-16 shrink-0 justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="h-8 px-2 font-semibold text-primary"
+          :disabled="leaving"
+          @click="done"
+        >
+          Done
+        </Button>
+      </div>
+    </header>
 
-    <form class="mt-4 flex flex-col gap-4" @submit.prevent="saveChanges">
+    <div v-if="loading" class="flex justify-center px-4 py-16">
+      <LoaderCircle class="size-6 animate-spin text-muted-foreground" />
+    </div>
+    <p v-else-if="!creating && !ready" class="px-4 py-16 text-center text-sm text-muted-foreground">
+      Couldn’t load this recipe.
+    </p>
+    <form v-else class="flex flex-col gap-4 px-4 pt-4 pb-4" @submit.prevent="saveNow">
       <div class="space-y-2">
         <img
           v-if="coverPreviewUrl"
@@ -393,22 +508,6 @@ watch(coverRecipeKey, (key) => {
         </Button>
       </div>
     </form>
-
-    <div
-      class="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-30 flex w-full max-w-md -translate-x-1/2 gap-2 px-4"
-    >
-      <Button
-        variant="outline"
-        class="flex-1 border-border bg-card"
-        :disabled="saving"
-        @click="router.push(returnUrl)"
-      >
-        Cancel
-      </Button>
-      <Button class="flex-1" :disabled="!canSave" @click="saveChanges">
-        {{ saving ? "Saving…" : "Save" }}
-      </Button>
-    </div>
 
     <CoverImagePickerDialog
       v-model:open="coverPickerOpen"
